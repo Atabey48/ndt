@@ -1,0 +1,2 @@
+- name: Install deps
+  run: npm ci
