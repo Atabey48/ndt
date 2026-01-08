@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NDT Document Hub</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="top-credit">by Furkan ATABEY</div>
+    <main class="app">
+      <section id="login-view" class="view active">
+        <h1>NDT Document Hub</h1>
+        <p class="subtitle">Üretici bazlı doküman yönetimi ve arama platformu</p>
+        <div class="role-switch">
+          <button class="pill" data-role="admin">Admin</button>
+          <button class="pill" data-role="user">Kullanıcı</button>
+        </div>
+        <form id="login-form" class="card">
+          <label>
+            Kullanıcı Adı
+            <input type="text" name="username" required />
+          </label>
+          <label>
+            Şifre
+            <input type="password" name="password" required />
+          </label>
+          <button type="submit" class="primary">Giriş Yap</button>
+          <div id="login-error" class="error"></div>
+        </form>
+      </section>
+
+      <section id="manufacturer-view" class="view">
+        <h2>Üretici Seçimi</h2>
+        <div id="manufacturer-list" class="grid"></div>
+      </section>
+
+      <section id="dashboard-view" class="view">
+        <div class="header-row">
+          <h2 id="dashboard-title">Dokümanlar</h2>
+          <button id="logout" class="ghost">Çıkış</button>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="documents">Dokümanlar</button>
+          <button class="tab" data-tab="tool">Tool/Search</button>
+          <button class="tab" data-tab="audit" id="audit-tab">Audit Logs</button>
+        </div>
+        <div id="documents-tab" class="tab-content active" data-tab="documents">
+          <div id="admin-tools" class="admin-tools">
+            <h3>PDF Yükle</h3>
+            <form id="upload-form" class="card">
+              <label>
+                Doküman Adı
+                <input type="text" name="title" required />
+              </label>
+              <label>
+                Revizyon Tarihi
+                <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
+              </label>
+              <label>
+                Etiketler
+                <input type="text" name="tags" placeholder="UT, RT, Visual" />
+              </label>
+              <label>
+                PDF Dosyası
+                <input type="file" name="file" accept="application/pdf" required />
+              </label>
+              <button type="submit" class="primary">Upload</button>
+              <div id="upload-message" class="hint"></div>
+            </form>
+          </div>
+          <div class="search-bar">
+            <input id="doc-search" type="text" placeholder="Doküman veya section ara" />
+          </div>
+          <div id="document-list" class="list"></div>
+          <div id="section-panel" class="section-panel"></div>
+        </div>
+        <div id="tool-tab" class="tab-content" data-tab="tool">
+          <div class="card">
+            <h3>Tool / Search</h3>
+            <div class="search-bar">
+              <input id="tool-query" type="text" placeholder="Anahtar kelime" />
+              <button id="tool-search" class="primary">Search</button>
+            </div>
+            <div id="tool-results" class="grid"></div>
+          </div>
+        </div>
+        <div id="audit-tab-content" class="tab-content" data-tab="audit">
+          <div class="card">
+            <h3>Audit Logs</h3>
+            <div id="audit-list" class="list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
