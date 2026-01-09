@@ -9,7 +9,7 @@ const json = (data: unknown, status = 200) =>
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });
@@ -42,7 +42,7 @@ export default {
         status: 204,
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
         },
       });
@@ -124,6 +124,23 @@ export default {
       if (!doc) {
         return json({ error: "Document not found" }, 404);
       }
+          const deleteMatch = path.match(/^\/api\/documents\/(\d+)$/);
+    if (deleteMatch && request.method === "DELETE") {
+      const documentId = Number(deleteMatch[1]);
+
+      // child tabloları temizle (sections)
+      await env.MY_DB.prepare("DELETE FROM sections WHERE document_id = ?1")
+        .bind(documentId)
+        .run();
+
+      const del = await env.MY_DB.prepare("DELETE FROM documents WHERE id = ?1")
+        .bind(documentId)
+        .run();
+
+      await logAction(env.MY_DB, "DELETE_DOCUMENT", { id: documentId });
+      return json({ status: "deleted", changes: del.meta.changes });
+    }
+
       const sections = await env.MY_DB.prepare(
         "SELECT id, heading_text, heading_level, page_start, page_end, order_index FROM sections WHERE document_id = ?1 ORDER BY order_index"
       )
@@ -133,6 +150,21 @@ export default {
       return json({ ...doc, sections: sections.results });
     }
 
-    return json({ error: "Not found" }, 404);
+        // API dışı tüm isteklerde statik web UI servis et
+    // wrangler.toml'da [assets] ile web/ klasörü bağlanmış olmalı
+    try {
+      // @ts-ignore
+      const res = await env.ASSETS.fetch(request);
+
+      // SPA fallback: dosya bulunamazsa index.html dön
+      if (res.status === 404) {
+        // @ts-ignore
+        return env.ASSETS.fetch(new Request(new URL("/", request.url), request));
+      }
+      return res;
+    } catch {
+      return json({ error: "Not found" }, 404);
+    }
+
   },
 };
