@@ -3,11 +3,13 @@ main = "worker/src/index.ts"
 compatibility_date = "2024-09-12"
 
 [assets]
-directory = "./web"
-binding = "ASSETS"
+directory = "web"
 
 [[d1_databases]]
 binding = "MY_DB"
 database_name = "ndt-document-hub"
 database_id = "d4cd519e-1dfb-4ab1-a7a2-309af261f42d"
-migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "PDF_BUCKET"
+bucket_name = "ndt-pdf-bucket"
