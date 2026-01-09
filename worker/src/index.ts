@@ -1,8 +1,7 @@
 export interface Env {
   MY_DB: D1Database;
-  API_BASE_URL?: string;
 
-  // wrangler.toml [assets] binding = "ASSETS" ile gelir
+  // wrangler.toml -> [assets] binding = "ASSETS"
   // @ts-ignore
   ASSETS: Fetcher;
 }
@@ -51,14 +50,6 @@ const logAction = async (db: D1Database, action: string, metadata: Record<string
     .run();
 };
 
-const parseJsonBody = async <T>(request: Request): Promise<T> => {
-  try {
-    return (await request.json()) as T;
-  } catch {
-    throw new Error("Invalid JSON body");
-  }
-};
-
 export default {
   async fetch(request: Request, env: Env) {
     // CORS preflight
@@ -105,34 +96,22 @@ export default {
         bindings.push(`%${query}%`);
       }
 
-      if (filters.length > 0) {
-        sql += ` WHERE ${filters.join(" AND ")}`;
-      }
-
+      if (filters.length > 0) sql += ` WHERE ${filters.join(" AND ")}`;
       sql += " ORDER BY uploaded_at DESC";
 
-      const stmt = env.MY_DB.prepare(sql).bind(...bindings);
-      const result = await stmt.all();
-
+      const result = await env.MY_DB.prepare(sql).bind(...bindings).all();
       await logAction(env.MY_DB, "VIEW_DOCUMENTS", { count: result.results.length, manufacturerId, query });
       return json(result.results);
     }
 
     if (path === "/api/documents" && request.method === "POST") {
-      type Body = {
+      const body = (await request.json().catch(() => null)) as null | {
         manufacturer_id: number;
         title: string;
         pdf_url?: string;
         revision_date?: string;
         tags?: string;
       };
-
-      let body: Body;
-      try {
-        body = await parseJsonBody<Body>(request);
-      } catch (e) {
-        return json({ error: (e as Error).message }, 400);
-      }
 
       if (!body?.manufacturer_id || !body?.title) {
         return json({ error: "manufacturer_id and title required" }, 400);
@@ -141,7 +120,6 @@ export default {
       await ensureManufacturers(env.MY_DB);
 
       const now = new Date().toISOString();
-
       const result = await env.MY_DB.prepare(
         "INSERT INTO documents (manufacturer_id, title, pdf_url, revision_date, tags, uploaded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
       )
@@ -156,17 +134,19 @@ export default {
         .run();
 
       const id = result.meta.last_row_id;
-
       await logAction(env.MY_DB, "CREATE_DOCUMENT", { id, title: body.title, manufacturer_id: body.manufacturer_id });
       return json({ id, uploaded_at: now });
     }
 
-    // GET /api/documents/:id  (detail + sections)
-    const documentDetailMatch = path.match(/^\/api\/documents\/(\d+)$/);
-    if (documentDetailMatch && request.method === "GET") {
-      const documentId = Number(documentDetailMatch[1]);
+    // GET /api/documents/:id (detail + sections)
+    const docDetailMatch = path.match(/^\/api\/documents\/(\d+)$/);
+    if (docDetailMatch && request.method === "GET") {
+      const documentId = Number(docDetailMatch[1]);
 
-      const doc = await env.MY_DB.prepare("SELECT * FROM documents WHERE id = ?1").bind(documentId).first();
+      const doc = await env.MY_DB.prepare("SELECT * FROM documents WHERE id = ?1")
+        .bind(documentId)
+        .first();
+
       if (!doc) return json({ error: "Document not found" }, 404);
 
       const sections = await env.MY_DB.prepare(
@@ -179,21 +159,25 @@ export default {
       return json({ ...doc, sections: sections.results });
     }
 
-    // DELETE /api/documents/:id
-    const documentDeleteMatch = path.match(/^\/api\/documents\/(\d+)$/);
-    if (documentDeleteMatch && request.method === "DELETE") {
-      const documentId = Number(documentDeleteMatch[1]);
+    // DELETE /api/documents/:id  (UI'daki Sil butonu bunu çağırıyor)
+    const docDeleteMatch = path.match(/^\/api\/documents\/(\d+)$/);
+    if (docDeleteMatch && request.method === "DELETE") {
+      const documentId = Number(docDeleteMatch[1]);
 
-      // önce child kayıtları temizle (schema cascade yok)
-      await env.MY_DB.prepare("DELETE FROM sections WHERE document_id = ?1").bind(documentId).run();
+      // child tabloları temizle (schema cascade yok)
+      await env.MY_DB.prepare("DELETE FROM sections WHERE document_id = ?1")
+        .bind(documentId)
+        .run();
 
-      const del = await env.MY_DB.prepare("DELETE FROM documents WHERE id = ?1").bind(documentId).run();
+      const del = await env.MY_DB.prepare("DELETE FROM documents WHERE id = ?1")
+        .bind(documentId)
+        .run();
 
       await logAction(env.MY_DB, "DELETE_DOCUMENT", { id: documentId, changes: del.meta.changes });
       return json({ status: "deleted", id: documentId, changes: del.meta.changes });
     }
 
-    // API path'leri buraya kadar, eşleşmediyse 404 JSON dön
+    // /api ile başlayıp eşleşmeyenler JSON 404 dönsün
     if (path.startsWith("/api/")) {
       return json({ error: "Not found" }, 404);
     }
@@ -205,10 +189,13 @@ export default {
       // @ts-ignore
       const res = await env.ASSETS.fetch(request);
 
-      // SPA fallback: dosya bulunamazsa index.html dön
       if (res.status === 404) {
-        // @ts-ignore
-        return env.ASSETS.fetch(new Request(new URL("/", request.url), request));
+        const accept = request.headers.get("Accept") || "";
+        // SPA fallback sadece HTML navigasyonlarında
+        if (accept.includes("text/html")) {
+          // @ts-ignore
+          return env.ASSETS.fetch(new Request(new URL("/", request.url), request));
+        }
       }
 
       return res;
