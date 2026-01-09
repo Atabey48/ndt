@@ -1,4 +1,4 @@
-name = "ndt-document-hub"
+name = "ndt"
 main = "worker/src/index.ts"
 compatibility_date = "2024-09-12"
 
