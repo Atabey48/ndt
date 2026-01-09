@@ -1,382 +1,446 @@
 export interface Env {
   MY_DB: D1Database;
+  ASSETS: Fetcher; // wrangler assets binding
 }
+
+type Role = "admin" | "user";
+
+type UserRow = {
+  id: number;
+  username: string;
+  role: Role;
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+  "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders,
+    },
   });
 
-const nowISO = () => new Date().toISOString();
+const nowIso = () => new Date().toISOString();
 
 const randomToken = () => {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+  // UUID + random for good measure
+  const a = crypto.randomUUID();
+  const b = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
+  return `${a}.${b}`;
 };
 
-type DbUser = { id: number; username: string; role: string };
-
-const ensureSeed = async (db: D1Database) => {
-  // manufacturers
-  const mCount = await db.prepare("SELECT COUNT(*) as c FROM manufacturers").first<{ c: number }>();
-  if ((mCount?.c ?? 0) === 0) {
-    const seed = [
-      ["Airbus", "#00205B"],
-      ["Boeing", "#0033A1"],
-      ["Embraer", "#1E3137"],
-      ["Bombardier", "#89674a"],
-    ];
-    await db.batch(
-      seed.map((row) => db.prepare("INSERT INTO manufacturers (name, theme_primary) VALUES (?1, ?2)").bind(...row))
-    );
+async function logAction(db: D1Database, action: string, metadata: Record<string, unknown>, userId?: number) {
+  try {
+    await db
+      .prepare("INSERT INTO audit_logs (action_type, metadata_json, created_at, user_id) VALUES (?1, ?2, ?3, ?4)")
+      .bind(action, JSON.stringify(metadata ?? {}), nowIso(), userId ?? null)
+      .run();
+  } catch {
+    // In case migration not applied yet, avoid crashing production
+    await db
+      .prepare("INSERT INTO audit_logs (action_type, metadata_json, created_at) VALUES (?1, ?2, ?3)")
+      .bind(action, JSON.stringify(metadata ?? {}), nowIso())
+      .run();
   }
+}
 
-  // users (simple plaintext for speed; if you want, later we can PBKDF2)
-  const uCount = await db.prepare("SELECT COUNT(*) as c FROM users").first<{ c: number }>();
-  if ((uCount?.c ?? 0) === 0) {
-    await db.batch([
-      db.prepare("INSERT INTO users (username, password, role) VALUES (?1, ?2, ?3)").bind("admin", "admin123", "admin"),
-      db.prepare("INSERT INTO users (username, password, role) VALUES (?1, ?2, ?3)").bind("user", "user123", "user"),
-    ]);
-  }
-};
+async function ensureManufacturers(db: D1Database) {
+  const existing = await db.prepare("SELECT COUNT(*) as count FROM manufacturers").first<{ count: number }>();
+  if (existing?.count && existing.count > 0) return;
 
-const logAction = async (db: D1Database, userId: number | null, action: string, meta: Record<string, unknown>) => {
-  await db
-    .prepare("INSERT INTO audit_logs (user_id, action_type, metadata_json, created_at) VALUES (?1, ?2, ?3, ?4)")
-    .bind(userId ?? null, action, JSON.stringify(meta), nowISO())
-    .run();
-};
+  const seed = [
+    ["Airbus", "#00205B", "#E5EEF9"],
+    ["Boeing", "#0033A1", "#DCE7F7"],
+    ["Embraer", "#1E3137", "#E7EEF0"],
+    ["Bombardier", "#89674a", "#F2ECE6"],
+  ];
 
-const getAuthUser = async (request: Request, env: Env): Promise<DbUser | null> => {
-  const auth = request.headers.get("Authorization") || "";
-  if (!auth.startsWith("Bearer ")) return null;
-  const token = auth.slice("Bearer ".length).trim();
+  const batch = seed.map((row) =>
+    db.prepare("INSERT INTO manufacturers (name, theme_primary, theme_secondary) VALUES (?1, ?2, ?3)").bind(...row)
+  );
+  await db.batch(batch);
+}
+
+async function getAuthUser(request: Request, env: Env): Promise<UserRow | null> {
+  const auth = request.headers.get("Authorization");
+  if (!auth || !auth.toLowerCase().startsWith("bearer ")) return null;
+  const token = auth.slice(7).trim();
   if (!token) return null;
 
-  const row = await env.MY_DB.prepare(
-    `SELECT users.id as id, users.username as username, users.role as role
-     FROM sessions JOIN users ON users.id = sessions.user_id
-     WHERE sessions.token = ?1`
-  )
-    .bind(token)
-    .first<DbUser>();
+  const sess = await env.MY_DB.prepare("SELECT user_id FROM sessions WHERE token = ?1").bind(token).first<{
+    user_id: number;
+  }>();
+  if (!sess?.user_id) return null;
 
-  return row ?? null;
-};
+  const user = await env.MY_DB.prepare("SELECT id, username, role FROM users WHERE id = ?1")
+    .bind(sess.user_id)
+    .first<UserRow>();
 
-const requireAuth = async (request: Request, env: Env) => {
-  const user = await getAuthUser(request, env);
-  if (!user) return { error: json({ error: "Unauthorized" }, 401), user: null as any };
-  return { error: null as Response | null, user };
-};
+  return user ?? null;
+}
 
-const requireAdmin = async (request: Request, env: Env) => {
-  const { error, user } = await requireAuth(request, env);
-  if (error) return { error, user: null as any };
-  if (user.role !== "admin") return { error: json({ error: "Admin only" }, 403), user: null as any };
-  return { error: null as Response | null, user };
-};
+function requireUser(user: UserRow | null): asserts user is UserRow {
+  if (!user) throw new Error("UNAUTHORIZED");
+}
+
+function requireAdmin(user: UserRow | null): asserts user is UserRow {
+  if (!user || user.role !== "admin") throw new Error("FORBIDDEN");
+}
+
+function isApi(path: string) {
+  return path.startsWith("/api/");
+}
 
 export default {
   async fetch(request: Request, env: Env) {
     try {
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-      await ensureSeed(env.MY_DB);
-
       const url = new URL(request.url);
       const path = url.pathname;
 
-      // health
-      if (path === "/api/health") return json({ status: "ok" });
+      // Serve static assets (UI)
+      if (!isApi(path)) {
+        // Map "/" -> "/index.html"
+        if (path === "/") {
+          const u = new URL(request.url);
+          u.pathname = "/index.html";
+          return env.ASSETS.fetch(new Request(u.toString(), request));
+        }
+        return env.ASSETS.fetch(request);
+      }
 
-      // auth login
+      // API routes
+      if (path === "/api/health") return json({ status: "ok", time: nowIso() });
+
+      // --- AUTH ---
       if (path === "/api/auth/login" && request.method === "POST") {
-        const body = (await request.json()) as { username: string; password: string };
-        if (!body?.username || !body?.password) return json({ error: "username and password required" }, 400);
+        const body = (await request.json().catch(() => null)) as null | { username?: string; password?: string };
+        const username = (body?.username ?? "").trim();
+        const password = (body?.password ?? "").trim();
+        if (!username || !password) return json({ error: "username and password required" }, 400);
 
-        const user = await env.MY_DB.prepare("SELECT id, username, role, password FROM users WHERE username=?1")
-          .bind(body.username)
-          .first<{ id: number; username: string; role: string; password: string }>();
+        const user = await env.MY_DB.prepare("SELECT id, username, role, password FROM users WHERE username = ?1")
+          .bind(username)
+          .first<{ id: number; username: string; role: Role; password: string }>();
 
-        if (!user || user.password !== body.password) {
-          await logAction(env.MY_DB, null, "LOGIN_FAIL", { username: body.username });
-          return json({ error: "Invalid credentials" }, 401);
+        if (!user || user.password !== password) {
+          await logAction(env.MY_DB, "LOGIN_FAILED", { username }, undefined);
+          return json({ error: "invalid credentials" }, 401);
         }
 
         const token = randomToken();
         await env.MY_DB.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?1, ?2, ?3)")
-          .bind(token, user.id, nowISO())
+          .bind(token, user.id, nowIso())
           .run();
 
-        await logAction(env.MY_DB, user.id, "LOGIN_OK", { username: user.username, role: user.role });
-        return json({ token, user: { id: user.id, username: user.username, role: user.role } });
+        await logAction(env.MY_DB, "LOGIN", { username }, user.id);
+
+        return json({
+          token,
+          user: { id: user.id, username: user.username, role: user.role },
+        });
       }
 
-      // auth logout
       if (path === "/api/auth/logout" && request.method === "POST") {
-        const auth = request.headers.get("Authorization") || "";
-        const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-        if (token) await env.MY_DB.prepare("DELETE FROM sessions WHERE token=?1").bind(token).run();
+        const user = await getAuthUser(request, env);
+        requireUser(user);
+
+        const auth = request.headers.get("Authorization")!;
+        const token = auth.slice(7).trim();
+
+        await env.MY_DB.prepare("DELETE FROM sessions WHERE token = ?1").bind(token).run();
+        await logAction(env.MY_DB, "LOGOUT", {}, user.id);
         return json({ status: "ok" });
       }
 
-      // manufacturers (auth optional; but we log if logged in)
-      if (path === "/api/manufacturers" && request.method === "GET") {
+      if (path === "/api/me" && request.method === "GET") {
         const user = await getAuthUser(request, env);
-        const result = await env.MY_DB.prepare("SELECT id, name, theme_primary FROM manufacturers ORDER BY name").all();
-        await logAction(env.MY_DB, user?.id ?? null, "VIEW_MANUFACTURERS", { count: result.results.length });
+        if (!user) return json({ user: null });
+        return json({ user });
+      }
+
+      // --- MANUFACTURERS (public, but logs if authed) ---
+      if (path === "/api/manufacturers" && request.method === "GET") {
+        await ensureManufacturers(env.MY_DB);
+        const result = await env.MY_DB.prepare(
+          "SELECT id, name, theme_primary, theme_secondary FROM manufacturers ORDER BY name"
+        ).all();
+        const user = await getAuthUser(request, env);
+        await logAction(env.MY_DB, "VIEW_MANUFACTURERS", { count: result.results.length }, user?.id);
         return json(result.results);
       }
 
-      // list docs by manufacturer (auth required)
+      // --- USERS (admin) ---
+      if (path === "/api/admin/users" && request.method === "GET") {
+        const user = await getAuthUser(request, env);
+        requireAdmin(user);
+
+        const rows = await env.MY_DB.prepare("SELECT id, username, role FROM users ORDER BY username").all();
+        await logAction(env.MY_DB, "ADMIN_VIEW_USERS", { count: rows.results.length }, user.id);
+        return json(rows.results);
+      }
+
+      if (path === "/api/admin/users" && request.method === "POST") {
+        const user = await getAuthUser(request, env);
+        requireAdmin(user);
+
+        const body = (await request.json().catch(() => null)) as null | {
+          username?: string;
+          password?: string;
+          role?: Role;
+        };
+        const username = (body?.username ?? "").trim();
+        const password = (body?.password ?? "").trim();
+        const role = (body?.role ?? "user") as Role;
+
+        if (!username || !password) return json({ error: "username and password required" }, 400);
+        if (role !== "admin" && role !== "user") return json({ error: "role must be admin|user" }, 400);
+
+        await env.MY_DB.prepare("INSERT INTO users (username, password, role) VALUES (?1, ?2, ?3)")
+          .bind(username, password, role)
+          .run();
+
+        await logAction(env.MY_DB, "ADMIN_CREATE_USER", { username, role }, user.id);
+        return json({ status: "created", username, role });
+      }
+
+      // --- ACTIVITY (admin) ---
+      if (path === "/api/admin/activity" && request.method === "GET") {
+        const user = await getAuthUser(request, env);
+        requireAdmin(user);
+
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? "200"), 500);
+        const rows = await env.MY_DB.prepare(
+          `
+          SELECT 
+            a.id, a.action_type, a.created_at, a.metadata_json,
+            a.user_id,
+            u.username as username,
+            u.role as role
+          FROM audit_logs a
+          LEFT JOIN users u ON u.id = a.user_id
+          ORDER BY a.created_at DESC
+          LIMIT ?1
+        `
+        )
+          .bind(limit)
+          .all();
+
+        return json(rows.results);
+      }
+
+      // --- DOCUMENTS ---
       if (path === "/api/documents" && request.method === "GET") {
-        const { error, user } = await requireAuth(request, env);
-        if (error) return error;
+        const user = await getAuthUser(request, env);
+        requireUser(user);
 
         const manufacturerId = url.searchParams.get("manufacturer_id");
-        if (!manufacturerId) return json({ error: "manufacturer_id required" }, 400);
+        const q = url.searchParams.get("q");
 
-        const docs = await env.MY_DB.prepare(
-          `SELECT id, manufacturer_id, title, pdf_url, revision_date, tags, uploaded_at
-           FROM documents
-           WHERE manufacturer_id=?1
-           ORDER BY uploaded_at DESC`
-        )
-          .bind(Number(manufacturerId))
-          .all();
+        const filters: string[] = [];
+        const bind: unknown[] = [];
+        let sql = "SELECT * FROM documents";
 
-        await logAction(env.MY_DB, user.id, "VIEW_DOC_LIST", { manufacturer_id: Number(manufacturerId), count: docs.results.length });
-        return json(docs.results);
-      }
-
-      // document detail (auth required)
-      const docMatch = path.match(/^\/api\/documents\/(\d+)$/);
-      if (docMatch && request.method === "GET") {
-        const { error, user } = await requireAuth(request, env);
-        if (error) return error;
-
-        const documentId = Number(docMatch[1]);
-        const doc = await env.MY_DB.prepare(
-          "SELECT id, manufacturer_id, title, pdf_url, revision_date, tags, uploaded_at FROM documents WHERE id=?1"
-        )
-          .bind(documentId)
-          .first();
-
-        if (!doc) return json({ error: "Document not found" }, 404);
-
-        const sections = await env.MY_DB.prepare(
-          "SELECT id, heading_text, heading_level, page_start, page_end, order_index FROM sections WHERE document_id=?1 ORDER BY order_index"
-        )
-          .bind(documentId)
-          .all();
-
-        const figures = await env.MY_DB.prepare(
-          "SELECT id, section_id, page_number, caption_text, order_index FROM figures WHERE document_id=?1 ORDER BY order_index"
-        )
-          .bind(documentId)
-          .all();
-
-        await logAction(env.MY_DB, user.id, "VIEW_DOCUMENT", { id: documentId, sections: sections.results.length, figures: figures.results.length });
-        return json({ ...doc, sections: sections.results, figures: figures.results });
-      }
-
-      // create doc (admin only)
-      if (path === "/api/documents" && request.method === "POST") {
-        const { error, user } = await requireAdmin(request, env);
-        if (error) return error;
-
-        const body = (await request.json()) as {
-          manufacturer_id: number;
-          title: string;
-          pdf_url: string;
-          revision_date?: string;
-          tags?: string;
-          sections?: Array<{
-            heading_text: string;
-            heading_level?: string;
-            page_start?: number | null;
-            page_end?: number | null;
-            order_index: number;
-          }>;
-          figures?: Array<{
-            section_order_index?: number | null; // map to sections by order_index
-            page_number?: number | null;
-            caption_text?: string | null;
-            order_index: number;
-          }>;
-        };
-
-        if (!body?.manufacturer_id || !body?.title || !body?.pdf_url) {
-          return json({ error: "manufacturer_id, title, pdf_url required" }, 400);
+        if (manufacturerId) {
+          filters.push("manufacturer_id = ?1");
+          bind.push(Number(manufacturerId));
+        }
+        if (q) {
+          filters.push("(title LIKE ? OR tags LIKE ?)");
+          bind.push(`%${q}%`, `%${q}%`);
         }
 
-        const uploadedAt = nowISO();
+        if (filters.length) {
+          sql += " WHERE " + filters.join(" AND ");
+        }
+        sql += " ORDER BY uploaded_at DESC";
+
+        const stmt = env.MY_DB.prepare(sql).bind(...bind);
+        const result = await stmt.all();
+
+        await logAction(env.MY_DB, "VIEW_DOCUMENTS", { count: result.results.length, manufacturerId, q }, user.id);
+        return json(result.results);
+      }
+
+      if (path === "/api/documents" && request.method === "POST") {
+        const user = await getAuthUser(request, env);
+        requireAdmin(user);
+
+        const body = (await request.json().catch(() => null)) as null | {
+          manufacturer_id?: number;
+          title?: string;
+          pdf_url?: string;
+          revision_date?: string;
+          tags?: string;
+          sections?: Array<{ heading_text: string; page_start?: number; page_end?: number }>;
+          figures?: Array<{ caption_text?: string; page_number?: number; section_index?: number }>;
+        };
+
+        const manufacturer_id = Number(body?.manufacturer_id ?? 0);
+        const title = (body?.title ?? "").trim();
+        if (!manufacturer_id || !title) return json({ error: "manufacturer_id and title required" }, 400);
+
+        await ensureManufacturers(env.MY_DB);
+
+        const uploaded_at = nowIso();
         const insert = await env.MY_DB.prepare(
-          `INSERT INTO documents (manufacturer_id, title, pdf_url, revision_date, tags, uploaded_at, uploaded_by)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+          `
+          INSERT INTO documents (manufacturer_id, title, pdf_url, revision_date, tags, uploaded_at, uploaded_by)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        `
         )
           .bind(
-            body.manufacturer_id,
-            body.title.trim(),
-            body.pdf_url.trim(),
-            body.revision_date?.trim() ?? null,
-            body.tags?.trim() ?? null,
-            uploadedAt,
+            manufacturer_id,
+            title,
+            (body?.pdf_url ?? "").trim() || null,
+            (body?.revision_date ?? "").trim() || null,
+            (body?.tags ?? "").trim() || null,
+            uploaded_at,
             user.id
           )
           .run();
 
         const documentId = Number(insert.meta.last_row_id);
 
-        // sections
-        const secRows = (body.sections ?? []).slice().sort((a, b) => a.order_index - b.order_index);
-        if (secRows.length) {
-          await env.MY_DB.batch(
-            secRows.map((s) =>
-              env.MY_DB.prepare(
-                `INSERT INTO sections (document_id, heading_text, heading_level, page_start, page_end, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
-              ).bind(
-                documentId,
-                s.heading_text,
-                s.heading_level ?? "H1",
-                s.page_start ?? null,
-                s.page_end ?? null,
-                s.order_index
-              )
+        // Optional sections insertion
+        const sections = Array.isArray(body?.sections) ? body!.sections! : [];
+        if (sections.length) {
+          const batch = sections.map((s, idx) =>
+            env.MY_DB.prepare(
+              "INSERT INTO sections (document_id, heading_text, heading_level, page_start, page_end, order_index) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+            ).bind(documentId, s.heading_text, "H1", s.page_start ?? null, s.page_end ?? null, idx + 1)
+          );
+          await env.MY_DB.batch(batch);
+        }
+
+        // Optional figures insertion
+        const figures = Array.isArray(body?.figures) ? body!.figures! : [];
+        if (figures.length) {
+          const batch = figures.map((f, idx) =>
+            env.MY_DB.prepare(
+              "INSERT INTO figures (document_id, section_id, page_number, caption_text, order_index) VALUES (?1, ?2, ?3, ?4, ?5)"
+            ).bind(
+              documentId,
+              null, // section_id mapping can be added later
+              f.page_number ?? null,
+              (f.caption_text ?? "").trim() || null,
+              idx + 1
             )
           );
+          await env.MY_DB.batch(batch);
         }
 
-        // figures (map section_order_index -> section_id)
-        const figRows = (body.figures ?? []).slice().sort((a, b) => a.order_index - b.order_index);
-        if (figRows.length) {
-          const secMap = new Map<number, number>();
-          if (secRows.length) {
-            const dbSecs = await env.MY_DB.prepare("SELECT id, order_index FROM sections WHERE document_id=?1")
-              .bind(documentId)
-              .all<{ id: number; order_index: number }>();
-            dbSecs.results.forEach((r) => secMap.set(r.order_index, r.id));
-          }
+        await logAction(
+          env.MY_DB,
+          "CREATE_DOCUMENT",
+          { documentId, manufacturer_id, title, sections: sections.length, figures: figures.length },
+          user.id
+        );
 
-          await env.MY_DB.batch(
-            figRows.map((f) => {
-              const sectionId =
-                f.section_order_index != null && secMap.has(f.section_order_index)
-                  ? secMap.get(f.section_order_index)!
-                  : null;
-
-              return env.MY_DB.prepare(
-                `INSERT INTO figures (document_id, section_id, page_number, caption_text, order_index)
-                 VALUES (?1, ?2, ?3, ?4, ?5)`
-              ).bind(documentId, sectionId, f.page_number ?? null, f.caption_text ?? null, f.order_index);
-            })
-          );
-        }
-
-        await logAction(env.MY_DB, user.id, "CREATE_DOCUMENT", {
-          id: documentId,
-          manufacturer_id: body.manufacturer_id,
-          title: body.title,
-          sections: secRows.length,
-          figures: figRows.length,
-        });
-
-        return json({ id: documentId, uploaded_at: uploadedAt });
+        return json({ id: documentId, uploaded_at });
       }
 
-      // tool search (auth required)
+      const docMatch = path.match(/^\/api\/documents\/(\d+)$/);
+      if (docMatch && request.method === "GET") {
+        const user = await getAuthUser(request, env);
+        requireUser(user);
+
+        const documentId = Number(docMatch[1]);
+        const doc = await env.MY_DB.prepare("SELECT * FROM documents WHERE id = ?1").bind(documentId).first();
+        if (!doc) return json({ error: "Document not found" }, 404);
+
+        const sections = await env.MY_DB.prepare(
+          "SELECT id, heading_text, heading_level, page_start, page_end, order_index FROM sections WHERE document_id = ?1 ORDER BY order_index"
+        )
+          .bind(documentId)
+          .all();
+
+        const figures = await env.MY_DB.prepare(
+          "SELECT id, page_number, caption_text, order_index FROM figures WHERE document_id = ?1 ORDER BY order_index"
+        )
+          .bind(documentId)
+          .all();
+
+        await logAction(env.MY_DB, "VIEW_DOCUMENT", { documentId }, user.id);
+
+        return json({ ...doc, sections: sections.results, figures: figures.results });
+      }
+
+      if (docMatch && request.method === "DELETE") {
+        const user = await getAuthUser(request, env);
+        requireAdmin(user);
+
+        const documentId = Number(docMatch[1]);
+
+        await env.MY_DB.prepare("DELETE FROM figures WHERE document_id = ?1").bind(documentId).run();
+        await env.MY_DB.prepare("DELETE FROM sections WHERE document_id = ?1").bind(documentId).run();
+        await env.MY_DB.prepare("DELETE FROM documents WHERE id = ?1").bind(documentId).run();
+
+        await logAction(env.MY_DB, "DELETE_DOCUMENT", { documentId }, user.id);
+        return json({ status: "deleted" });
+      }
+
+      // --- TOOL SEARCH (server-side; simple internal + external links) ---
       if (path === "/api/tool/search" && request.method === "GET") {
-        const { error, user } = await requireAuth(request, env);
-        if (error) return error;
+        const user = await getAuthUser(request, env);
+        requireUser(user);
 
-        const q = (url.searchParams.get("q") || "").trim();
-        if (!q) return json({ error: "q required" }, 400);
+        const q = (url.searchParams.get("q") ?? "").trim();
+        if (!q) return json({ query: "", results: [] });
 
-        const results: Array<{ title: string; description: string; source: string; link: string; features: string[] }> =
-          [];
+        // internal docs
+        const docs = await env.MY_DB.prepare(
+          "SELECT id, title, tags, pdf_url, revision_date FROM documents WHERE title LIKE ?1 OR tags LIKE ?2 ORDER BY uploaded_at DESC LIMIT 20"
+        )
+          .bind(`%${q}%`, `%${q}%`)
+          .all();
 
-        // Simple fetch + light parsing (best-effort)
-        const fetchText = async (u: string) => {
-          const r = await fetch(u, { headers: { "User-Agent": "ndt-document-hub" } });
-          if (!r.ok) throw new Error(`fetch failed: ${u}`);
-          return await r.text();
-        };
+        const results = [
+          ...docs.results.map((d: any) => ({
+            type: "internal",
+            title: d.title,
+            description: d.tags ?? "",
+            link: d.pdf_url ?? "",
+            meta: { document_id: d.id, revision_date: d.revision_date ?? "" },
+          })),
+          {
+            type: "external",
+            title: "Aerofab NDT Search",
+            description: "Open external search page",
+            link: `https://aerofabndt.com/search?q=${encodeURIComponent(q)}`,
+            meta: {},
+          },
+          {
+            type: "external",
+            title: "TechNDT Search",
+            description: "Open external search page",
+            link: `https://technandt.com/search?q=${encodeURIComponent(q)}`,
+            meta: {},
+          },
+        ];
 
-        const safeAbs = (base: string, href: string) => {
-          try {
-            return new URL(href, base).toString();
-          } catch {
-            return href;
-          }
-        };
-
-        // Aerofab
-        try {
-          const base = "https://aerofabndt.com";
-          const html = await fetchText(`${base}/search?q=${encodeURIComponent(q)}`);
-
-          // Best-effort: find <a ...>title</a> blocks
-          const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([^<]{3,200})<\/a>/gi;
-          let m: RegExpExecArray | null;
-          let c = 0;
-          while ((m = linkRe.exec(html)) && c < 8) {
-            const href = m[1];
-            const title = m[2].replace(/\s+/g, " ").trim();
-            if (!title || title.toLowerCase().includes("search")) continue;
-            results.push({ title, description: "", source: "aerofabndt", link: safeAbs(base, href), features: [] });
-            c++;
-          }
-        } catch {
-          // ignore
-        }
-
-        // Technandt
-        try {
-          const base = "https://technandt.com";
-          const html = await fetchText(`${base}/search?q=${encodeURIComponent(q)}`);
-
-          const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([^<]{3,200})<\/a>/gi;
-          let m: RegExpExecArray | null;
-          let c = 0;
-          while ((m = linkRe.exec(html)) && c < 8) {
-            const href = m[1];
-            const title = m[2].replace(/\s+/g, " ").trim();
-            if (!title || title.toLowerCase().includes("search")) continue;
-            results.push({ title, description: "", source: "technandt", link: safeAbs(base, href), features: [] });
-            c++;
-          }
-        } catch {
-          // ignore
-        }
-
-        if (results.length === 0) {
-          results.push({
-            title: "No results",
-            description: "Search sources returned no parseable results.",
-            source: "system",
-            link: "#",
-            features: [],
-          });
-        }
-
-        await logAction(env.MY_DB, user.id, "TOOL_SEARCH", { q, count: results.length });
+        await logAction(env.MY_DB, "TOOL_SEARCH", { q, internal_count: docs.results.length }, user.id);
         return json({ query: q, results });
       }
 
       return json({ error: "Not found" }, 404);
     } catch (err: any) {
-      return json({ error: "Worker crashed", message: err?.message ?? String(err) }, 500);
+      const msg = String(err?.message ?? err);
+
+      if (msg === "UNAUTHORIZED") return json({ error: "unauthorized" }, 401);
+      if (msg === "FORBIDDEN") return json({ error: "forbidden" }, 403);
+
+      // Cloudflare 1101 (Worker exception) prevention: always respond JSON
+      return json({ error: "worker_error", detail: msg }, 500);
     }
   },
 };
