@@ -5,77 +5,84 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDT Document Hub</title>
     <link rel="stylesheet" href="styles.css" />
+    <!-- PDF.js (CDN, no npm deps) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js"></script>
   </head>
   <body>
     <div class="top-credit">by Furkan Atabey</div>
 
     <main class="app">
       <!-- LOGIN -->
-      <section id="login-view" class="view active">
+      <section id="view-login" class="view active">
         <h1>NDT Document Hub</h1>
-        <p class="subtitle">Manufacturer-based document hub (Admin/User access)</p>
+        <p class="subtitle">Aircraft-based document hub (Role-based access)</p>
 
         <form id="login-form" class="card">
           <label>
             Username
             <input type="text" name="username" autocomplete="username" required />
           </label>
+
           <label>
             Password
             <input type="password" name="password" autocomplete="current-password" required />
           </label>
 
-          <button type="submit" class="primary">Sign In</button>
+          <button class="primary" type="submit">Sign In</button>
           <div id="login-error" class="error"></div>
 
-          <div class="hint">
-            Default accounts (if not changed): admin/admin123, user/user123
-          </div>
+          <div class="hint">Default accounts (if not changed): admin/admin123, user/user123</div>
         </form>
       </section>
 
-      <!-- MANUFACTURERS -->
-      <section id="manufacturer-view" class="view">
-        <div class="header-row">
-          <h2>Select Manufacturer</h2>
-          <div class="header-actions">
-            <button id="back-to-login" class="ghost">Back</button>
-            <button id="logout" class="ghost">Logout</button>
-          </div>
-        </div>
-        <div id="manufacturer-list" class="grid"></div>
-      </section>
-
-      <!-- DASHBOARD -->
-      <section id="dashboard-view" class="view">
+      <!-- APP -->
+      <section id="view-app" class="view">
         <div class="header-row">
           <div>
-            <h2 id="dashboard-title">Documents</h2>
+            <h2 id="header-title">Aircraft</h2>
             <div id="whoami" class="hint"></div>
           </div>
           <div class="header-actions">
-            <button id="back-to-manufacturers" class="ghost">Back</button>
-            <button id="logout-2" class="ghost">Logout</button>
+            <button id="btn-logout" class="ghost" type="button">Logout</button>
           </div>
         </div>
 
         <div class="tabs">
-          <button class="tab active" data-tab="docs">Documents</button>
+          <button class="tab active" data-tab="aircraft">Aircraft</button>
+          <button class="tab" data-tab="documents">Documents</button>
           <button class="tab" data-tab="tool">Tool Search</button>
           <button class="tab admin-only" data-tab="admin">Admin</button>
-          <button class="tab admin-only" data-tab="activity">Activity</button>
+          <button class="tab admin-only" data-tab="users">Users</button>
+          <button class="tab admin-only" data-tab="reports">Employee Report</button>
         </div>
 
-        <!-- DOCS TAB -->
-        <div class="tab-content active" data-tab="docs">
+        <!-- AIRCRAFT TAB -->
+        <div class="tab-content active" data-tab="aircraft">
+          <div class="card">
+            <div class="row">
+              <h3>Choose Aircraft</h3>
+              <input id="aircraft-filter" class="input" type="text" placeholder="Filter aircraft..." />
+            </div>
+            <div id="aircraft-list" class="grid"></div>
+          </div>
+        </div>
+
+        <!-- DOCUMENTS TAB -->
+        <div class="tab-content" data-tab="documents">
           <div class="split">
             <div>
-              <h3 class="section-title">Document Menu</h3>
-              <div id="document-list" class="list"></div>
+              <div class="row">
+                <h3 class="section-title">Document Menu</h3>
+                <button id="btn-back-aircraft" class="ghost" type="button">Back to Aircraft</button>
+              </div>
+              <div id="doc-list" class="list"></div>
             </div>
+
             <div>
               <h3 class="section-title">Details</h3>
-              <div id="detail-panel" class="section-panel"></div>
+              <div id="doc-detail" class="section-panel">
+                <div class="hint">Select a document.</div>
+              </div>
             </div>
           </div>
         </div>
@@ -83,94 +90,123 @@
         <!-- TOOL TAB -->
         <div class="tab-content" data-tab="tool">
           <div class="card">
-            <h3>Tool Search</h3>
+            <h3>Tool Search (AerofabNDT + TechNDT)</h3>
             <div class="search-bar">
-              <input id="tool-query" type="text" placeholder="Keyword" />
-              <button id="tool-search" class="primary">Search</button>
+              <input id="tool-q" type="text" placeholder="Part / keyword" />
+              <button id="tool-run" class="primary" type="button">Search</button>
             </div>
             <div id="tool-results" class="grid"></div>
           </div>
         </div>
 
         <!-- ADMIN TAB -->
-        <div class="tab-content" data-tab="admin">
+        <div class="tab-content admin-only" data-tab="admin">
+          <div class="card">
+            <h3>Upload PDF Document (Stored in R2)</h3>
+
+            <form id="upload-form" class="stack">
+              <label>
+                Aircraft
+                <select id="upload-aircraft" required></select>
+              </label>
+
+              <label>
+                Title
+                <input id="upload-title" type="text" required />
+              </label>
+
+              <label>
+                Revision Date (optional)
+                <input id="upload-rev" type="text" placeholder="YYYY-MM-DD" />
+              </label>
+
+              <label>
+                Tags (optional)
+                <input id="upload-tags" type="text" placeholder="UT, RT, VT..." />
+              </label>
+
+              <label>
+                PDF File
+                <input id="upload-file" type="file" accept="application/pdf" required />
+              </label>
+
+              <div class="row">
+                <button id="btn-extract" class="ghost" type="button">Extract Headings/Figures</button>
+                <div id="extract-status" class="hint"></div>
+              </div>
+
+              <label>
+                Extracted Headings (JSON) - editable
+                <textarea id="sections-json" spellcheck="false"></textarea>
+              </label>
+
+              <label>
+                Extracted Figures (JSON) - editable
+                <textarea id="figures-json" spellcheck="false"></textarea>
+              </label>
+
+              <button class="primary" type="submit">Upload</button>
+              <div id="upload-msg" class="hint"></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- USERS TAB -->
+        <div class="tab-content admin-only" data-tab="users">
           <div class="grid two">
             <div class="card">
-              <h3>Upload Document (Option 1: URL-based)</h3>
-              <form id="upload-form" class="stack">
-                <label>
-                  Title
-                  <input type="text" name="title" required />
-                </label>
-                <label>
-                  PDF URL (optional)
-                  <input type="url" name="pdf_url" placeholder="https://..." />
-                </label>
-                <label>
-                  Revision Date (optional)
-                  <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
-                </label>
-                <label>
-                  Tags (optional)
-                  <input type="text" name="tags" placeholder="UT, RT, VT..." />
-                </label>
-
-                <label>
-                  Sections (optional, one per line)
-                  <textarea
-                    name="sections"
-                    placeholder="Example: 1. General|1|3&#10;Example: 2. Safety|4|6"
-                  ></textarea>
-                </label>
-
-                <label>
-                  Figures (optional, one per line)
-                  <textarea
-                    name="figures"
-                    placeholder="Example: Figure 1 - Setup|2&#10;Example: Fig. 2 - Results|5"
-                  ></textarea>
-                </label>
-
-                <button type="submit" class="primary">Save</button>
-                <div id="upload-message" class="hint"></div>
-              </form>
-            </div>
-
-            <div class="card">
-              <h3>User Management</h3>
+              <h3>Create User</h3>
               <form id="create-user-form" class="stack">
                 <label>
                   Username
-                  <input type="text" name="username" required />
+                  <input id="new-username" type="text" required />
                 </label>
                 <label>
                   Password
-                  <input type="text" name="password" required />
+                  <input id="new-password" type="text" required />
                 </label>
                 <label>
                   Role
-                  <select name="role">
+                  <select id="new-role">
                     <option value="user">user</option>
                     <option value="admin">admin</option>
                   </select>
                 </label>
-                <button type="submit" class="primary">Create User</button>
-                <div id="create-user-message" class="hint"></div>
-              </form>
+                <label class="row">
+                  <input id="new-active" type="checkbox" checked />
+                  <span class="hint">Active</span>
+                </label>
 
-              <div class="divider"></div>
-              <h4>Users</h4>
+                <button class="primary" type="submit">Create</button>
+                <div id="create-user-msg" class="hint"></div>
+              </form>
+            </div>
+
+            <div class="card">
+              <h3>Users</h3>
               <div id="users-list" class="list"></div>
             </div>
           </div>
         </div>
 
-        <!-- ACTIVITY TAB -->
-        <div class="tab-content" data-tab="activity">
-          <div class="card">
-            <h3>Activity Log</h3>
-            <div class="hint">Shows actions with timestamp (latest first).</div>
-            <div id="activity-list" class="list"></div>
+        <!-- REPORTS TAB -->
+        <div class="tab-content admin-only" data-tab="reports">
+          <div class="grid two">
+            <div class="card">
+              <div class="row">
+                <h3>Sessions (Active Time)</h3>
+                <button id="btn-refresh-sessions" class="ghost" type="button">Refresh</button>
+              </div>
+              <div id="sessions-list" class="list"></div>
+            </div>
+
+            <div class="card">
+              <div class="row">
+                <h3>Audit Logs (What they did)</h3>
+                <button id="btn-refresh-audit" class="ghost" type="button">Refresh</button>
+              </div>
+              <div id="audit-list" class="list"></div>
+            </div>
           </div>
         </div>
       </section>
