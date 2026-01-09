@@ -3,6 +3,7 @@ const state = {
   user: null,
   manufacturer: null,
   theme: null,
+  role: "user",
 };
 
 const views = {
@@ -19,20 +20,28 @@ const sectionPanel = document.getElementById("section-panel");
 const dashboardTitle = document.getElementById("dashboard-title");
 const uploadForm = document.getElementById("upload-form");
 const uploadMessage = document.getElementById("upload-message");
-const auditTab = document.getElementById("audit-tab");
-const auditTabContent = document.getElementById("audit-tab-content");
-const auditList = document.getElementById("audit-list");
 const toolQuery = document.getElementById("tool-query");
 const toolSearch = document.getElementById("tool-search");
 const toolResults = document.getElementById("tool-results");
 const docSearch = document.getElementById("doc-search");
+const roleButtons = document.querySelectorAll(".pill");
+
+const API_BASE_URL = window.API_BASE_URL || "";
+
+roleButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    roleButtons.forEach((btn) => btn.classList.remove("active"));
+    button.classList.add("active");
+    state.role = button.dataset.role || "user";
+  });
+});
 
 const apiFetch = async (path, options = {}) => {
   const headers = options.headers || {};
   if (state.token) {
     headers.Authorization = `Bearer ${state.token}`;
   }
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   if (!response.ok) {
     const detail = await response.json().catch(() => ({ detail: "Hata" }));
     throw new Error(detail.detail || "Hata");
@@ -69,15 +78,14 @@ const selectManufacturer = async (manufacturer) => {
   await loadDocuments();
   if (state.user.role !== "admin") {
     document.getElementById("admin-tools").style.display = "none";
-    auditTab.style.display = "none";
   } else {
-    auditTab.style.display = "inline-block";
+    document.getElementById("admin-tools").style.display = "block";
   }
   showView("dashboard");
 };
 
 const loadDocuments = async () => {
-  const documents = await apiFetch(`/api/manufacturers/${state.manufacturer.id}/documents`);
+  const documents = await apiFetch(`/api/documents?manufacturer_id=${state.manufacturer.id}`);
   renderDocuments(documents);
 };
 
@@ -92,10 +100,18 @@ const renderDocuments = (documents) => {
       card.innerHTML = `
         <strong>${doc.title}</strong>
         <span>${new Date(doc.uploaded_at).toLocaleDateString()}</span>
+        <span>${doc.revision_date ? doc.revision_date : "Revizyon yok"}</span>
         <span>${doc.tags ? doc.tags : "Etiket yok"}</span>
-        <button class="ghost" data-id="${doc.id}">Section'lar</button>
-        <a class="ghost" href="/api/documents/${doc.id}/pdf" target="_blank">Open PDF</a>
+        <button class="ghost" data-id="${doc.id}">Detay</button>
       `;
+      if (doc.pdf_url) {
+        const link = document.createElement("a");
+        link.className = "ghost";
+        link.href = doc.pdf_url;
+        link.target = "_blank";
+        link.textContent = "Open PDF";
+        card.appendChild(link);
+      }
       if (state.user.role === "admin") {
         const del = document.createElement("button");
         del.className = "ghost";
@@ -112,27 +128,29 @@ const renderDocuments = (documents) => {
 };
 
 const loadSections = async (document) => {
-  const sections = await apiFetch(`/api/documents/${document.id}/sections`);
-  sectionPanel.innerHTML = `<h3>${document.title} - Sections</h3>`;
+  const detail = await apiFetch(`/api/documents/${document.id}`);
+  const sections = detail.sections || [];
+  sectionPanel.innerHTML = `<h3>${document.title} - Detay</h3>`;
   const list = document.createElement("div");
   list.className = "list";
-  for (const section of sections) {
+  if (sections.length === 0) {
     const item = document.createElement("div");
     item.className = "card";
     item.innerHTML = `
-      <strong>${section.heading_text}</strong>
-      <span>Sayfa: ${section.page_start || "?"} - ${section.page_end || "?"}</span>
-      <div class="figures" id="figures-${section.id}"></div>
+      <strong>Section bulunamadı</strong>
+      <span>Bu doküman için section verisi girilmedi.</span>
     `;
     list.appendChild(item);
-    const figures = await apiFetch(`/api/sections/${section.id}/figures`);
-    const figContainer = item.querySelector(`#figures-${section.id}`);
-    figures.forEach((figure) => {
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = figure.caption_text || "Figure";
-      figContainer.appendChild(tag);
-    });
+  } else {
+    for (const section of sections) {
+      const item = document.createElement("div");
+      item.className = "card";
+      item.innerHTML = `
+        <strong>${section.heading_text}</strong>
+        <span>Sayfa: ${section.page_start || "?"} - ${section.page_end || "?"}</span>
+      `;
+      list.appendChild(item);
+    }
   }
   sectionPanel.appendChild(list);
 };
@@ -142,16 +160,10 @@ loginForm.addEventListener("submit", async (event) => {
   loginError.textContent = "";
   const formData = new FormData(loginForm);
   try {
-    const response = await apiFetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: formData.get("username"),
-        password: formData.get("password"),
-      }),
-    });
-    state.token = response.token;
-    state.user = response.user;
+    state.user = {
+      username: formData.get("username") || "guest",
+      role: state.role,
+    };
     const manufacturers = await apiFetch("/api/manufacturers");
     renderManufacturers(manufacturers);
     showView("manufacturer");
@@ -165,11 +177,18 @@ uploadForm.addEventListener("submit", async (event) => {
   uploadMessage.textContent = "";
   const formData = new FormData(uploadForm);
   try {
-    await apiFetch(`/api/manufacturers/${state.manufacturer.id}/documents`, {
+    await apiFetch(`/api/documents`, {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manufacturer_id: state.manufacturer.id,
+        title: formData.get("title"),
+        pdf_url: formData.get("pdf_url"),
+        revision_date: formData.get("revision_date"),
+        tags: formData.get("tags"),
+      }),
     });
-    uploadMessage.textContent = "PDF yüklendi.";
+    uploadMessage.textContent = "Doküman kaydedildi.";
     uploadForm.reset();
     await loadDocuments();
   } catch (error) {
@@ -178,7 +197,6 @@ uploadForm.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("logout").addEventListener("click", async () => {
-  await apiFetch("/api/auth/logout", { method: "POST" });
   state.token = null;
   state.user = null;
   state.manufacturer = null;
@@ -196,18 +214,6 @@ const setTab = (name) => {
 tabs.forEach((tab) => {
   tab.addEventListener("click", async () => {
     setTab(tab.dataset.tab);
-    if (tab.dataset.tab === "audit" && state.user.role === "admin") {
-      const logs = await apiFetch("/api/audit-logs");
-      auditList.innerHTML = logs
-        .map((log) => `
-          <div class="document-card">
-            <strong>${log.action_type}</strong>
-            <span>${new Date(log.created_at).toLocaleString()}</span>
-            <span>${log.metadata_json || ""}</span>
-          </div>
-        `)
-        .join("");
-    }
   });
 });
 
@@ -217,21 +223,23 @@ toolSearch.addEventListener("click", async () => {
   toolResults.innerHTML = "";
   const query = toolQuery.value.trim();
   if (!query) return;
-  const response = await apiFetch("/api/tool/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-  });
-  response.results.forEach((result) => {
+  const response = await apiFetch(`/api/documents?q=${encodeURIComponent(query)}`);
+  response.forEach((doc) => {
     const card = document.createElement("div");
     card.className = "document-card";
     card.innerHTML = `
-      <strong>${result.title}</strong>
-      <span>${result.description}</span>
-      <div>${result.features.map((f) => `<span class="tag">${f}</span>`).join("")}</div>
-      <span>${result.source}</span>
-      <a class="ghost" href="${result.link}" target="_blank">Link</a>
+      <strong>${doc.title}</strong>
+      <span>${doc.tags || "Etiket yok"}</span>
+      <span>${doc.revision_date || ""}</span>
     `;
+    if (doc.pdf_url) {
+      const link = document.createElement("a");
+      link.className = "ghost";
+      link.href = doc.pdf_url;
+      link.target = "_blank";
+      link.textContent = "Open PDF";
+      card.appendChild(link);
+    }
     toolResults.appendChild(card);
   });
 });
