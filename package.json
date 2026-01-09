@@ -1,7 +1,7 @@
 {
   "name": "ndt-document-hub",
-  "version": "2.0.0",
-  "description": "Cloudflare Workers + D1 + R2 - NDT Document Hub",
+  "version": "3.0.0",
+  "description": "Cloudflare Workers + D1 + R2 - NDT Document Hub (Aircraft-based)",
   "type": "module",
   "scripts": {
     "dev": "npx wrangler dev",
