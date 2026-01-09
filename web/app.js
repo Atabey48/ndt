@@ -1,10 +1,8 @@
 const state = {
-  token: null,
-  user: null,
+  role: "user",
+  username: "guest",
+  adminKey: "",
   manufacturer: null,
-  theme: null,
-  documents: [],
-  heartbeatTimer: null,
 };
 
 const views = {
@@ -15,248 +13,166 @@ const views = {
 
 const loginForm = document.getElementById("login-form");
 const loginError = document.getElementById("login-error");
-
-const logoutBtn1 = document.getElementById("logout");
-const logoutBtn2 = document.getElementById("logout2");
-const backBtn = document.getElementById("back-to-manufacturers");
-
 const manufacturerList = document.getElementById("manufacturer-list");
-const dashboardTitle = document.getElementById("dashboard-title");
-
 const documentList = document.getElementById("document-list");
-const docSearch = document.getElementById("doc-search");
-
-const tabs = document.querySelectorAll(".tab");
-const tabContents = document.querySelectorAll(".tab-content");
-
-const adminTabBtn = document.getElementById("admin-tab-btn");
-const activityTabBtn = document.getElementById("activity-tab-btn");
-const adminTab = document.getElementById("admin-tab");
-const activityTab = document.getElementById("activity-tab");
-
+const dashboardTitle = document.getElementById("dashboard-title");
 const uploadForm = document.getElementById("upload-form");
 const uploadMessage = document.getElementById("upload-message");
+const docSearch = document.getElementById("doc-search");
+const roleButtons = document.querySelectorAll(".pill");
+const adminTools = document.getElementById("admin-tools");
+const adminKeyWrap = document.getElementById("admin-key-wrap");
 
-const createUserForm = document.getElementById("create-user-form");
-const createUserMsg = document.getElementById("create-user-msg");
-const usersTable = document.getElementById("users-table");
+const API_BASE_URL = ""; // same domain
 
-const sessionsTable = document.getElementById("sessions-table");
-const auditTable = document.getElementById("audit-table");
+roleButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    roleButtons.forEach((btn) => btn.classList.remove("active"));
+    button.classList.add("active");
+    state.role = button.dataset.role || "user";
 
-const API_BASE_URL = ""; // same origin
+    adminKeyWrap.style.display = state.role === "admin" ? "block" : "none";
+  });
+});
 
-function showView(name) {
+const showView = (name) => {
   Object.values(views).forEach((v) => v.classList.remove("active"));
   views[name].classList.add("active");
-}
+};
 
-function setTheme(m) {
-  document.documentElement.style.setProperty("--primary", m.theme_primary || "#0b3d91");
-  document.documentElement.style.setProperty("--secondary", m.theme_secondary || "#dce7f7");
-  state.theme = m;
-}
-
-async function apiFetch(path, options = {}) {
+const apiFetch = async (path, options = {}) => {
   const headers = options.headers || {};
-  headers["Content-Type"] = headers["Content-Type"] || "application/json";
-  if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
+  if (state.role === "admin" && state.adminKey) {
+    headers["X-Admin-Key"] = state.adminKey;
+  }
 
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const payload = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(payload.error || "Request failed");
+    throw new Error(data?.error || data?.message || "Request failed");
   }
-  return res.json();
-}
+  return data;
+};
 
-async function apiFetchForm(path, formData) {
-  const headers = {};
-  if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
-
-  const res = await fetch(`${API_BASE_URL}${path}`, { method: "POST", headers, body: formData });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(payload.error || "Request failed");
-  }
-  return res.json();
-}
-
-/* -------------------- heartbeat (duration tracking) -------------------- */
-
-async function heartbeat() {
-  if (!state.token) return;
-  try {
-    await apiFetch("/api/analytics/heartbeat", {
-      method: "POST",
-      body: JSON.stringify({ path: location.pathname }),
-    });
-  } catch (_) {
-    // ignore
-  }
-}
-
-function startHeartbeat() {
-  stopHeartbeat();
-  heartbeat();
-  state.heartbeatTimer = setInterval(heartbeat, 15000);
-}
-
-function stopHeartbeat() {
-  if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
-  state.heartbeatTimer = null;
-}
-
-/* -------------------- UI: manufacturers -------------------- */
-
-function renderManufacturers(list) {
+const loadManufacturers = async () => {
+  const manufacturers = await apiFetch("/api/manufacturers");
   manufacturerList.innerHTML = "";
-  list.forEach((m) => {
+  manufacturers.forEach((m) => {
     const card = document.createElement("button");
     card.className = "document-card";
     card.innerHTML = `<strong>${m.name}</strong><span>Open</span>`;
     card.addEventListener("click", () => selectManufacturer(m));
     manufacturerList.appendChild(card);
   });
-}
+};
 
-async function selectManufacturer(m) {
+const selectManufacturer = async (m) => {
   state.manufacturer = m;
-  setTheme(m);
   dashboardTitle.textContent = `${m.name} Documents`;
+  adminTools.style.display = state.role === "admin" ? "block" : "none";
   await loadDocuments();
   showView("dashboard");
+};
 
-  // Admin-only tabs
-  const isAdmin = state.user?.role === "admin";
-  adminTabBtn.style.display = isAdmin ? "inline-flex" : "none";
-  activityTabBtn.style.display = isAdmin ? "inline-flex" : "none";
-  adminTab.style.display = isAdmin ? "block" : "none";
-  activityTab.style.display = isAdmin ? "block" : "none";
+const loadDocuments = async () => {
+  const q = docSearch.value.trim();
+  const url = new URL("/api/documents", location.origin);
+  url.searchParams.set("manufacturer_id", String(state.manufacturer.id));
+  if (q) url.searchParams.set("q", q);
 
-  if (isAdmin) {
-    await refreshAdminPanels();
-  } else {
-    setTab("documents");
-  }
-}
+  const documents = await apiFetch(`${url.pathname}?${url.searchParams.toString()}`);
+  renderDocuments(documents);
+};
 
-/* -------------------- UI: documents -------------------- */
-
-async function loadDocuments() {
-  const docs = await apiFetch(`/api/documents?manufacturer_id=${state.manufacturer.id}`);
-  state.documents = docs;
-  renderDocuments();
-}
-
-function renderDocuments() {
-  const q = (docSearch.value || "").toLowerCase();
-  const docs = state.documents.filter((d) => d.title.toLowerCase().includes(q));
-
+const renderDocuments = (documents) => {
   documentList.innerHTML = "";
-  if (docs.length === 0) {
-    documentList.innerHTML = `<div class="card"><strong>No documents found</strong><span>Try another search keyword.</span></div>`;
-    return;
-  }
-
-  docs.forEach((doc) => {
+  documents.forEach((doc) => {
     const card = document.createElement("div");
     card.className = "document-card";
-    const date = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleString() : "";
+
+    const uploaded = doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleString() : "";
     card.innerHTML = `
       <strong>${doc.title}</strong>
-      <span>Uploaded: ${date}</span>
+      <span>Uploaded: ${uploaded}</span>
       <span>Revision: ${doc.revision_date || "-"}</span>
       <span>Tags: ${doc.tags || "-"}</span>
-      <span>By: ${doc.uploaded_by || "-"}</span>
-      <div class="row">
-        <a class="ghost" href="/api/documents/${doc.id}/pdf" target="_blank">Open PDF</a>
-      </div>
     `;
+
+    const link = document.createElement("a");
+    link.className = "ghost";
+    link.href = doc.pdf_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Open PDF";
+    card.appendChild(link);
+
+    if (state.role === "admin") {
+      const del = document.createElement("button");
+      del.className = "ghost";
+      del.textContent = "Delete";
+      del.addEventListener("click", async () => {
+        try {
+          await apiFetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+          await loadDocuments();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      card.appendChild(del);
+    }
+
     documentList.appendChild(card);
   });
-}
+};
 
-docSearch.addEventListener("input", renderDocuments);
-
-/* -------------------- Tabs -------------------- */
-
-function setTab(name) {
-  tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-  tabContents.forEach((c) => c.classList.toggle("active", c.dataset.tab === name));
-}
-
-tabs.forEach((tab) => {
-  tab.addEventListener("click", async () => {
-    const name = tab.dataset.tab;
-    setTab(name);
-
-    if (name === "admin" && state.user?.role === "admin") await refreshAdminPanels();
-    if (name === "activity" && state.user?.role === "admin") await refreshActivityPanels();
-  });
-});
-
-setTab("documents");
-
-/* -------------------- Admin: create user -------------------- */
-
-createUserForm.addEventListener("submit", async (e) => {
+loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  createUserMsg.textContent = "";
-  const fd = new FormData(createUserForm);
+  loginError.textContent = "";
+
+  const fd = new FormData(loginForm);
+  state.username = (fd.get("username") || "guest").toString().trim() || "guest";
+  state.adminKey = (fd.get("admin_key") || "").toString().trim();
 
   try {
-    await apiFetch("/api/admin/users", {
-      method: "POST",
-      body: JSON.stringify({
-        username: fd.get("new_username"),
-        password: fd.get("new_password"),
-        role: fd.get("new_role"),
-      }),
-    });
-
-    createUserMsg.textContent = "User created successfully.";
-    createUserForm.reset();
-    await refreshUsers();
+    // admin seçtiyse ama key yoksa uyar
+    if (state.role === "admin" && !state.adminKey) {
+      throw new Error("Admin Key is required for admin mode.");
+    }
+    await loadManufacturers();
+    showView("manufacturer");
   } catch (err) {
-    createUserMsg.textContent = err.message;
+    loginError.textContent = err.message;
   }
 });
 
-async function refreshUsers() {
-  const users = await apiFetch("/api/admin/users");
-  usersTable.innerHTML = `
-    <div class="table-row table-head">
-      <div>ID</div><div>Username</div><div>Role</div><div>Active</div><div>Created</div>
-    </div>
-    ${users
-      .map(
-        (u) => `
-      <div class="table-row">
-        <div>${u.id}</div>
-        <div>${u.username}</div>
-        <div>${u.role}</div>
-        <div>${u.is_active ? "yes" : "no"}</div>
-        <div>${new Date(u.created_at).toLocaleString()}</div>
-      </div>`
-      )
-      .join("")}
-  `;
-}
+docSearch.addEventListener("input", async () => {
+  if (!state.manufacturer) return;
+  await loadDocuments();
+});
 
-/* -------------------- Admin: upload PDF -------------------- */
+document.getElementById("logout").addEventListener("click", () => {
+  state.manufacturer = null;
+  showView("login");
+});
 
 uploadForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   uploadMessage.textContent = "";
 
+  const fd = new FormData(uploadForm);
   try {
-    const fd = new FormData(uploadForm);
-    fd.append("manufacturer_id", String(state.manufacturer.id));
-
-    await apiFetchForm("/api/admin/documents", fd);
-
-    uploadMessage.textContent = "Upload completed.";
+    await apiFetch("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manufacturer_id: state.manufacturer.id,
+        title: fd.get("title"),
+        pdf_url: fd.get("pdf_url"),
+        revision_date: fd.get("revision_date"),
+        tags: fd.get("tags"),
+      }),
+    });
+    uploadMessage.textContent = "Saved.";
     uploadForm.reset();
     await loadDocuments();
   } catch (err) {
@@ -264,121 +180,4 @@ uploadForm.addEventListener("submit", async (e) => {
   }
 });
 
-/* -------------------- Admin: activity -------------------- */
-
-function fmtDuration(seconds) {
-  const s = Number(seconds || 0);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  if (m < 1) return `${r}s`;
-  return `${m}m ${r}s`;
-}
-
-async function refreshSessions() {
-  const sessions = await apiFetch("/api/admin/sessions?limit=200");
-
-  sessionsTable.innerHTML = `
-    <div class="table-row table-head">
-      <div>User</div><div>Role</div><div>Start</div><div>Last seen</div><div>Duration</div><div>Last path</div>
-    </div>
-    ${sessions
-      .map(
-        (s) => `
-      <div class="table-row">
-        <div>${s.username}</div>
-        <div>${s.role}</div>
-        <div>${new Date(s.created_at).toLocaleString()}</div>
-        <div>${new Date(s.last_seen_at).toLocaleString()}</div>
-        <div>${fmtDuration(s.duration_seconds)}</div>
-        <div>${s.last_path || "-"}</div>
-      </div>`
-      )
-      .join("")}
-  `;
-}
-
-async function refreshAudit() {
-  const logs = await apiFetch("/api/admin/audit-logs?limit=200");
-
-  auditTable.innerHTML = `
-    <div class="table-row table-head">
-      <div>Time</div><div>User</div><div>Action</div><div>Path</div>
-    </div>
-    ${logs
-      .map((l) => {
-        const who = l.username || (l.user_id ? `user#${l.user_id}` : "anonymous");
-        return `
-        <div class="table-row">
-          <div>${new Date(l.created_at).toLocaleString()}</div>
-          <div>${who}</div>
-          <div>${l.action_type}</div>
-          <div>${l.path || "-"}</div>
-        </div>`;
-      })
-      .join("")}
-  `;
-}
-
-async function refreshAdminPanels() {
-  await refreshUsers();
-}
-
-async function refreshActivityPanels() {
-  await refreshSessions();
-  await refreshAudit();
-}
-
-/* -------------------- Auth flow -------------------- */
-
-loginForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  loginError.textContent = "";
-
-  const fd = new FormData(loginForm);
-  const username = fd.get("username");
-  const password = fd.get("password");
-
-  try {
-    const res = await apiFetch("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-
-    state.token = res.token;
-    state.user = res.user;
-
-    startHeartbeat();
-
-    const manufacturers = await apiFetch("/api/manufacturers");
-    renderManufacturers(manufacturers);
-    showView("manufacturer");
-  } catch (err) {
-    loginError.textContent = err.message;
-  }
-});
-
-async function doLogout() {
-  try {
-    if (state.token) {
-      await apiFetch("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
-    }
-  } catch (_) {}
-  stopHeartbeat();
-  state.token = null;
-  state.user = null;
-  state.manufacturer = null;
-  state.documents = [];
-  showView("login");
-}
-
-logoutBtn1.addEventListener("click", doLogout);
-logoutBtn2.addEventListener("click", doLogout);
-
-backBtn.addEventListener("click", async () => {
-  const manufacturers = await apiFetch("/api/manufacturers");
-  renderManufacturers(manufacturers);
-  showView("manufacturer");
-});
-
-/* -------------------- Initial -------------------- */
 showView("login");
