@@ -1,0 +1,13 @@
+name = "ndt-document-hub"
+main = "worker/src/index.ts"
+compatibility_date = "2024-09-12"
+
+[vars]
+API_BASE_URL = ""
+
+[[d1_databases]]
+binding = "MY_DB"
+database_name = "ndt-document-hub"
+database_id = "d4cd519e-1dfb-4ab1-a7a2-309af261f42d"
+
+routes = ["*/api/*"]
