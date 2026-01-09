@@ -1,97 +1,147 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDT Document Hub</title>
-    <link rel="stylesheet" href="/style.css?v=5" />
+    <link rel="stylesheet" href="/style.css?v=2" />
   </head>
   <body>
-    <div class="top-credit">by Furkan ATABEY</div>
+    <div class="top-credit">by Furkan Atabey</div>
+
     <main class="app">
+      <!-- LOGIN -->
       <section id="login-view" class="view active">
         <h1>NDT Document Hub</h1>
-        <p class="subtitle">Üretici bazlı doküman yönetimi ve arama platformu</p>
-        <div class="role-switch">
-          <button class="pill" data-role="admin">Admin</button>
-          <button class="pill" data-role="user">Kullanıcı</button>
-        </div>
+        <p class="subtitle">Manufacturer-based document library for NDT references</p>
+
         <form id="login-form" class="card">
           <label>
-            Kullanıcı Adı
-            <input type="text" name="username" required />
+            Username
+            <input type="text" name="username" autocomplete="username" required />
           </label>
           <label>
-            Şifre
-            <input type="password" name="password" required />
+            Password
+            <input type="password" name="password" autocomplete="current-password" required />
           </label>
-          <button type="submit" class="primary">Giriş Yap</button>
+
+          <button type="submit" class="primary">Sign in</button>
           <div id="login-error" class="error"></div>
         </form>
       </section>
 
+      <!-- MANUFACTURERS -->
       <section id="manufacturer-view" class="view">
-        <h2>Üretici Seçimi</h2>
+        <div class="header-row">
+          <div>
+            <h2>Select Manufacturer</h2>
+            <p class="hint">Theme will be applied automatically based on the selected OEM.</p>
+          </div>
+          <button id="logout" class="ghost">Sign out</button>
+        </div>
+
         <div id="manufacturer-list" class="grid"></div>
       </section>
 
+      <!-- DASHBOARD -->
       <section id="dashboard-view" class="view">
         <div class="header-row">
-          <h2 id="dashboard-title">Dokümanlar</h2>
-          <button id="logout" class="ghost">Çıkış</button>
-        </div>
-        <div class="tabs">
-          <button class="tab active" data-tab="documents">Dokümanlar</button>
-          <button class="tab" data-tab="tool">Tool/Search</button>
-        </div>
-
-        <div id="documents-tab" class="tab-content active" data-tab="documents">
-          <div id="admin-tools" class="admin-tools">
-            <h3>Doküman Kaydı</h3>
-            <form id="upload-form" class="card">
-              <label>
-                Doküman Adı
-                <input type="text" name="title" required />
-              </label>
-              <label>
-                PDF URL (opsiyonel)
-                <input type="url" name="pdf_url" placeholder="https://..." />
-              </label>
-              <label>
-                Revizyon Tarihi
-                <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
-              </label>
-              <label>
-                Etiketler
-                <input type="text" name="tags" placeholder="UT, RT, Visual" />
-              </label>
-              <button type="submit" class="primary">Kaydet</button>
-              <div id="upload-message" class="hint"></div>
-            </form>
+          <h2 id="dashboard-title">Documents</h2>
+          <div class="header-actions">
+            <button id="back-to-manufacturers" class="ghost">Back</button>
+            <button id="logout2" class="ghost">Sign out</button>
           </div>
+        </div>
 
+        <div class="tabs">
+          <button class="tab active" data-tab="documents">Documents</button>
+          <button class="tab" data-tab="admin" id="admin-tab-btn">Admin</button>
+          <button class="tab" data-tab="activity" id="activity-tab-btn">Activity</button>
+        </div>
+
+        <!-- Documents tab -->
+        <div class="tab-content active" data-tab="documents">
           <div class="search-bar">
-            <input id="doc-search" type="text" placeholder="Doküman veya section ara" />
+            <input id="doc-search" type="text" placeholder="Search document title..." />
           </div>
 
           <div id="document-list" class="list"></div>
-          <div id="section-panel" class="section-panel"></div>
         </div>
 
-        <div id="tool-tab" class="tab-content" data-tab="tool">
-          <div class="card">
-            <h3>Tool / Search</h3>
-            <div class="search-bar">
-              <input id="tool-query" type="text" placeholder="Anahtar kelime" />
-              <button id="tool-search" class="primary">Search</button>
+        <!-- Admin tab (admin only) -->
+        <div class="tab-content" data-tab="admin" id="admin-tab">
+          <div class="grid two">
+            <div class="card">
+              <h3>Create User</h3>
+              <form id="create-user-form" class="form-grid">
+                <label>
+                  Username
+                  <input type="text" name="new_username" required />
+                </label>
+                <label>
+                  Password
+                  <input type="password" name="new_password" required />
+                </label>
+                <label>
+                  Role
+                  <select name="new_role" required>
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+                <button type="submit" class="primary">Create</button>
+                <div id="create-user-msg" class="hint"></div>
+              </form>
             </div>
-            <div id="tool-results" class="grid"></div>
+
+            <div class="card">
+              <h3>Upload PDF</h3>
+              <form id="upload-form" class="form-grid">
+                <label>
+                  Title
+                  <input type="text" name="title" required />
+                </label>
+                <label>
+                  Revision Date (optional)
+                  <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
+                </label>
+                <label>
+                  Tags (optional)
+                  <input type="text" name="tags" placeholder="UT, RT, VT..." />
+                </label>
+                <label>
+                  PDF File
+                  <input type="file" name="file" accept="application/pdf" required />
+                </label>
+                <button type="submit" class="primary">Upload</button>
+                <div id="upload-message" class="hint"></div>
+              </form>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:16px;">
+            <h3>Users</h3>
+            <div id="users-table" class="table"></div>
+          </div>
+        </div>
+
+        <!-- Activity tab (admin only) -->
+        <div class="tab-content" data-tab="activity" id="activity-tab">
+          <div class="grid two">
+            <div class="card">
+              <h3>Active Sessions</h3>
+              <div class="hint">Duration is computed from sign-in time to last heartbeat.</div>
+              <div id="sessions-table" class="table"></div>
+            </div>
+            <div class="card">
+              <h3>Audit Logs</h3>
+              <div id="audit-table" class="table"></div>
+            </div>
           </div>
         </div>
       </section>
     </main>
 
-    <script src="/app.js?v=4"></script>
+    <script src="/app.js?v=2"></script>
   </body>
 </html>
-
