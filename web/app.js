@@ -2,8 +2,7 @@ const state = {
   token: null,
   user: null,
   manufacturer: null,
-  manufacturers: [],
-  documents: [],
+  theme: null,
 };
 
 const views = {
@@ -15,15 +14,17 @@ const views = {
 const loginForm = document.getElementById("login-form");
 const loginError = document.getElementById("login-error");
 
+const backToLoginBtn = document.getElementById("back-to-login");
+const backToManufacturersBtn = document.getElementById("back-to-manufacturers");
+const logoutBtn1 = document.getElementById("logout");
+const logoutBtn2 = document.getElementById("logout-2");
+
 const manufacturerList = document.getElementById("manufacturer-list");
-
+const documentList = document.getElementById("document-list");
+const detailPanel = document.getElementById("detail-panel");
 const dashboardTitle = document.getElementById("dashboard-title");
-const roleBadge = document.getElementById("role-badge");
+const whoami = document.getElementById("whoami");
 
-const docMenu = document.getElementById("doc-menu");
-const contentPanel = document.getElementById("content-panel");
-
-const adminTools = document.getElementById("admin-tools");
 const uploadForm = document.getElementById("upload-form");
 const uploadMessage = document.getElementById("upload-message");
 
@@ -31,43 +32,65 @@ const toolQuery = document.getElementById("tool-query");
 const toolSearch = document.getElementById("tool-search");
 const toolResults = document.getElementById("tool-results");
 
-const backToLogin = document.getElementById("back-to-login");
-const backToManufacturers = document.getElementById("back-to-manufacturers");
-const logoutBtn = document.getElementById("logout");
+const createUserForm = document.getElementById("create-user-form");
+const createUserMessage = document.getElementById("create-user-message");
+const usersList = document.getElementById("users-list");
 
-// ---------- NAV (Back/Forward) ----------
-const showView = (name, push = true) => {
-  Object.values(views).forEach((v) => v.classList.remove("active"));
-  views[name].classList.add("active");
+const activityList = document.getElementById("activity-list");
 
-  if (push) history.pushState({ view: name }, "", `#${name}`);
-};
+const tabs = document.querySelectorAll(".tab");
+const tabContents = document.querySelectorAll(".tab-content");
 
-window.addEventListener("popstate", (e) => {
-  const v = e.state?.view;
-  if (v && views[v]) showView(v, false);
-});
+const API_BASE_URL = ""; // same origin
 
 const apiFetch = async (path, options = {}) => {
   const headers = options.headers || {};
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
-  const res = await fetch(path, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || data?.message || "Request failed");
-  return data;
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const msg = payload?.error || payload?.detail || "Request failed";
+    throw new Error(msg);
+  }
+
+  return payload;
+};
+
+const showView = (name) => {
+  Object.values(views).forEach((v) => v.classList.remove("active"));
+  views[name].classList.add("active");
 };
 
 const setTheme = (manufacturer) => {
-  const color = manufacturer.theme_primary || "#0b3d91";
-  document.documentElement.style.setProperty("--primary", color);
-  // derive secondary lightly
-  document.documentElement.style.setProperty("--secondary", "rgba(0,0,0,0.06)");
+  document.documentElement.style.setProperty("--primary", manufacturer.theme_primary || "#0033A1");
+  document.documentElement.style.setProperty("--secondary", manufacturer.theme_secondary || "#DCE7F7");
+  state.theme = manufacturer;
 };
 
-const renderManufacturers = (items) => {
+const setTab = (name) => {
+  tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  tabContents.forEach((c) => c.classList.toggle("active", c.dataset.tab === name));
+};
+
+tabs.forEach((tab) => tab.addEventListener("click", () => setTab(tab.dataset.tab)));
+
+const refreshAdminVisibility = () => {
+  const adminOnlyTabs = document.querySelectorAll(".admin-only");
+  const isAdmin = state.user?.role === "admin";
+  adminOnlyTabs.forEach((el) => (el.style.display = isAdmin ? "inline-flex" : "none"));
+};
+
+const renderManufacturers = (manufacturers) => {
   manufacturerList.innerHTML = "";
-  items.forEach((m) => {
+  manufacturers.forEach((m) => {
     const card = document.createElement("button");
     card.className = "document-card";
     card.innerHTML = `<strong>${m.name}</strong>`;
@@ -76,179 +99,129 @@ const renderManufacturers = (items) => {
   });
 };
 
-const selectManufacturer = async (m) => {
-  state.manufacturer = m;
-  setTheme(m);
-
-  dashboardTitle.textContent = `${m.name} Documents`;
-  roleBadge.textContent = `Logged in as: ${state.user.username} (${state.user.role})`;
-
-  adminTools.style.display = state.user.role === "admin" ? "block" : "none";
-
+const selectManufacturer = async (manufacturer) => {
+  state.manufacturer = manufacturer;
+  setTheme(manufacturer);
+  dashboardTitle.textContent = `${manufacturer.name} Documents`;
+  detailPanel.innerHTML = `<div class="hint">Select a document from the menu.</div>`;
   await loadDocuments();
-  renderDocMenu();
-  contentPanel.innerHTML = `<h3>Select a document from the menu</h3><p class="hint">Sections and figures will appear here.</p>`;
-
   showView("dashboard");
-};
-
-const loadManufacturers = async () => {
-  const items = await apiFetch("/api/manufacturers");
-  state.manufacturers = items;
-  renderManufacturers(items);
+  setTab("docs");
 };
 
 const loadDocuments = async () => {
   const docs = await apiFetch(`/api/documents?manufacturer_id=${state.manufacturer.id}`);
-  state.documents = docs;
+  renderDocuments(docs);
 };
 
-const renderDocMenu = () => {
-  docMenu.innerHTML = "";
-  state.documents.forEach((doc) => {
-    const btn = document.createElement("button");
-    btn.className = "menu-item";
-    btn.textContent = doc.title;
-    btn.addEventListener("click", async () => {
-      await openDocument(doc.id);
-    });
-    docMenu.appendChild(btn);
+const renderDocuments = (docs) => {
+  documentList.innerHTML = "";
+  if (!docs.length) {
+    const empty = document.createElement("div");
+    empty.className = "card";
+    empty.innerHTML = `<strong>No documents yet</strong><span>Admin can add documents from Admin tab.</span>`;
+    documentList.appendChild(empty);
+    return;
+  }
+
+  docs.forEach((doc) => {
+    const item = document.createElement("button");
+    item.className = "menu-item";
+    item.innerHTML = `<strong>${doc.title}</strong>`;
+    item.addEventListener("click", () => loadDocumentDetail(doc.id));
+    documentList.appendChild(item);
   });
 };
 
-const openDocument = async (documentId) => {
-  const detail = await apiFetch(`/api/documents/${documentId}`);
+const loadDocumentDetail = async (docId) => {
+  const detail = await apiFetch(`/api/documents/${docId}`);
+
   const sections = detail.sections || [];
   const figures = detail.figures || [];
 
-  const pdfLink = detail.pdf_url ? `<a class="ghost" href="${detail.pdf_url}" target="_blank" rel="noopener">Open PDF</a>` : "";
+  const pdfLink = detail.pdf_url
+    ? `<a class="ghost" href="${detail.pdf_url}" target="_blank" rel="noreferrer">Open PDF</a>`
+    : `<span class="hint">No PDF URL</span>`;
 
-  const secHtml = sections.length
-    ? `<div class="block">
-         <h4>Headings</h4>
-         <div class="list">
-           ${sections
-             .map(
-               (s) => `
-              <div class="row">
-                <div class="row-title">${escapeHtml(s.heading_text)}</div>
-                <div class="row-meta">p.${s.page_start ?? "?"}</div>
-              </div>`
-             )
-             .join("")}
-         </div>
-       </div>`
-    : `<div class="block"><h4>Headings</h4><p class="hint">No headings extracted.</p></div>`;
-
-  const figHtml = figures.length
-    ? `<div class="block">
-         <h4>Figures</h4>
-         <div class="list">
-           ${figures
-             .map(
-               (f) => `
-              <div class="row">
-                <div class="row-title">${escapeHtml(f.caption_text || "Figure")}</div>
-                <div class="row-meta">p.${f.page_number ?? "?"}</div>
-              </div>`
-             )
-             .join("")}
-         </div>
-       </div>`
-    : `<div class="block"><h4>Figures</h4><p class="hint">No figures detected.</p></div>`;
-
-  contentPanel.innerHTML = `
-    <div class="header-row" style="margin-bottom: 10px;">
-      <h3>${escapeHtml(detail.title)}</h3>
-      ${pdfLink}
+  const meta = `
+    <div class="meta">
+      <div><strong>Title:</strong> ${detail.title}</div>
+      <div><strong>Revision:</strong> ${detail.revision_date || "-"}</div>
+      <div><strong>Tags:</strong> ${detail.tags || "-"}</div>
+      <div>${pdfLink}</div>
     </div>
-    <div class="hint">Uploaded: ${new Date(detail.uploaded_at).toLocaleString()}</div>
-    ${secHtml}
-    ${figHtml}
+  `;
+
+  const sectionsHtml = sections.length
+    ? sections
+        .map(
+          (s) => `
+            <div class="card">
+              <strong>${escapeHtml(s.heading_text)}</strong>
+              <span>Pages: ${s.page_start ?? "?"} - ${s.page_end ?? "?"}</span>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="card"><strong>No sections</strong><span>Add sections during upload (Admin).</span></div>`;
+
+  const figuresHtml = figures.length
+    ? figures
+        .map(
+          (f) => `
+            <div class="card">
+              <strong>${escapeHtml(f.caption_text || "Figure")}</strong>
+              <span>Page: ${f.page_number ?? "?"}</span>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="card"><strong>No figures</strong><span>Add figures during upload (Admin).</span></div>`;
+
+  detailPanel.innerHTML = `
+    ${meta}
+    <div class="divider"></div>
+    <h4>Sections</h4>
+    <div class="list">${sectionsHtml}</div>
+    <div class="divider"></div>
+    <h4>Figures</h4>
+    <div class="list">${figuresHtml}</div>
   `;
 };
 
-// ---------- ADMIN: PDF.js Extract ----------
-const extractHeadingsAndFiguresFromPdfUrl = async (pdfUrl) => {
-  // PDF.js global
-  const pdfjsLib = window["pdfjsLib"];
-  if (!pdfjsLib) throw new Error("PDF.js not loaded");
+const parseSectionsText = (text) => {
+  // Format: Heading|pageStart|pageEnd
+  const lines = (text || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
 
-  // worker src
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
-
-  const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
-  const pdf = await loadingTask.promise;
-
-  const headings = [];
-  const figures = [];
-  let headingOrder = 1;
-  let figureOrder = 1;
-
-  // simple heuristics: line starts with "1", "1.1", "2.3.4" etc
-  const headingRe = /^(\d+(?:\.\d+)*)\s+(.{3,})$/;
-  const figRe = /\b(Figure|Fig\.)\b/i;
-
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const strings = textContent.items.map((it) => (it.str || "").trim()).filter(Boolean);
-
-    // join close items into pseudo-lines
-    // best-effort: treat each item as a line (works reasonably for many PDFs)
-    for (const line of strings) {
-      const m = headingRe.exec(line);
-      if (m) {
-        headings.push({
-          heading_text: line,
-          heading_level: "H1",
-          page_start: pageNum,
-          page_end: pageNum,
-          order_index: headingOrder++,
-        });
-      }
-      if (figRe.test(line)) {
-        const lastHeading = headings.length ? headings[headings.length - 1].order_index : null;
-        figures.push({
-          section_order_index: lastHeading,
-          page_number: pageNum,
-          caption_text: line,
-          order_index: figureOrder++,
-        });
-      }
-    }
-  }
-
-  if (headings.length === 0) {
-    headings.push({
-      heading_text: "Document Overview",
-      heading_level: "H1",
-      page_start: 1,
-      page_end: pdf.numPages,
-      order_index: 1,
-    });
-  }
-
-  return { headings, figures };
-};
-
-// ---------- TOOL SEARCH ----------
-const renderToolResults = (payload) => {
-  toolResults.innerHTML = "";
-  const items = payload?.results || [];
-  items.forEach((r) => {
-    const a = document.createElement("a");
-    a.className = "menu-item";
-    a.href = r.link || "#";
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.textContent = `${r.title} (${r.source})`;
-    toolResults.appendChild(a);
+  return lines.map((line) => {
+    const [heading, ps, pe] = line.split("|").map((x) => (x ?? "").trim());
+    return {
+      heading_text: heading,
+      page_start: ps ? Number(ps) : undefined,
+      page_end: pe ? Number(pe) : undefined,
+    };
   });
 };
 
-// ---------- EVENTS ----------
+const parseFiguresText = (text) => {
+  // Format: Caption|pageNumber
+  const lines = (text || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  return lines.map((line) => {
+    const [caption, page] = line.split("|").map((x) => (x ?? "").trim());
+    return {
+      caption_text: caption,
+      page_number: page ? Number(page) : undefined,
+    };
+  });
+};
+
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   loginError.textContent = "";
@@ -267,47 +240,52 @@ loginForm.addEventListener("submit", async (e) => {
     state.token = res.token;
     state.user = res.user;
 
-    await loadManufacturers();
+    whoami.textContent = `Signed in as ${state.user.username} (${state.user.role})`;
+    refreshAdminVisibility();
+
+    const manufacturers = await apiFetch("/api/manufacturers");
+    renderManufacturers(manufacturers);
     showView("manufacturer");
   } catch (err) {
     loginError.textContent = err.message;
   }
 });
 
-backToLogin.addEventListener("click", () => showView("login"));
-backToManufacturers.addEventListener("click", () => showView("manufacturer"));
-
-logoutBtn.addEventListener("click", async () => {
+const logout = async () => {
   try {
-    await apiFetch("/api/auth/logout", { method: "POST" });
-  } catch {}
+    if (state.token) {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    }
+  } catch {
+    // ignore
+  }
   state.token = null;
   state.user = null;
   state.manufacturer = null;
-  state.documents = [];
+  whoami.textContent = "";
   showView("login");
+};
+
+logoutBtn1.addEventListener("click", logout);
+logoutBtn2.addEventListener("click", logout);
+
+backToLoginBtn.addEventListener("click", () => showView("login"));
+backToManufacturersBtn.addEventListener("click", async () => {
+  const manufacturers = await apiFetch("/api/manufacturers");
+  renderManufacturers(manufacturers);
+  showView("manufacturer");
 });
 
 uploadForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   uploadMessage.textContent = "";
 
-  if (!state.manufacturer) {
-    uploadMessage.textContent = "Select manufacturer first.";
-    return;
-  }
-
   const fd = new FormData(uploadForm);
   const title = String(fd.get("title") || "").trim();
-  const pdfUrl = String(fd.get("pdf_url") || "").trim();
-  const revision = String(fd.get("revision_date") || "").trim();
-  const tags = String(fd.get("tags") || "").trim();
 
   try {
-    uploadMessage.textContent = "Loading PDF and extracting headings...";
-    const { headings, figures } = await extractHeadingsAndFiguresFromPdfUrl(pdfUrl);
-
-    uploadMessage.textContent = `Extracted ${headings.length} headings, ${figures.length} figures. Saving...`;
+    const sections = parseSectionsText(String(fd.get("sections") || ""));
+    const figures = parseFiguresText(String(fd.get("figures") || ""));
 
     await apiFetch("/api/documents", {
       method: "POST",
@@ -315,19 +293,17 @@ uploadForm.addEventListener("submit", async (e) => {
       body: JSON.stringify({
         manufacturer_id: state.manufacturer.id,
         title,
-        pdf_url: pdfUrl,
-        revision_date: revision || null,
-        tags: tags || null,
-        sections: headings,
+        pdf_url: String(fd.get("pdf_url") || "").trim(),
+        revision_date: String(fd.get("revision_date") || "").trim(),
+        tags: String(fd.get("tags") || "").trim(),
+        sections,
         figures,
       }),
     });
 
     uploadMessage.textContent = "Saved.";
     uploadForm.reset();
-
     await loadDocuments();
-    renderDocMenu();
   } catch (err) {
     uploadMessage.textContent = err.message;
   }
@@ -339,14 +315,92 @@ toolSearch.addEventListener("click", async () => {
   if (!q) return;
 
   try {
-    const payload = await apiFetch(`/api/tool/search?q=${encodeURIComponent(q)}`);
-    renderToolResults(payload);
+    const res = await apiFetch(`/api/tool/search?q=${encodeURIComponent(q)}`);
+    (res.results || []).forEach((r) => {
+      const card = document.createElement("div");
+      card.className = "document-card";
+      card.innerHTML = `
+        <strong>${escapeHtml(r.title)}</strong>
+        <span>${escapeHtml(r.description || "")}</span>
+      `;
+      if (r.link) {
+        const a = document.createElement("a");
+        a.className = "ghost";
+        a.href = r.link;
+        a.target = "_blank";
+        a.rel = "noreferrer";
+        a.textContent = "Open";
+        card.appendChild(a);
+      }
+      toolResults.appendChild(card);
+    });
   } catch (err) {
-    toolResults.innerHTML = `<div class="hint">${escapeHtml(err.message)}</div>`;
+    const card = document.createElement("div");
+    card.className = "document-card";
+    card.innerHTML = `<strong>Error</strong><span>${escapeHtml(err.message)}</span>`;
+    toolResults.appendChild(card);
   }
 });
 
-// ---------- HELPERS ----------
+createUserForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  createUserMessage.textContent = "";
+
+  const fd = new FormData(createUserForm);
+  const username = String(fd.get("username") || "").trim();
+  const password = String(fd.get("password") || "").trim();
+  const role = String(fd.get("role") || "user");
+
+  try {
+    await apiFetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, role }),
+    });
+    createUserMessage.textContent = "User created.";
+    createUserForm.reset();
+    await loadUsers();
+  } catch (err) {
+    createUserMessage.textContent = err.message;
+  }
+});
+
+async function loadUsers() {
+  if (state.user?.role !== "admin") return;
+  usersList.innerHTML = "";
+  const users = await apiFetch("/api/admin/users");
+  users.forEach((u) => {
+    const row = document.createElement("div");
+    row.className = "card";
+    row.innerHTML = `<strong>${escapeHtml(u.username)}</strong><span>role: ${escapeHtml(u.role)}</span>`;
+    usersList.appendChild(row);
+  });
+}
+
+async function loadActivity() {
+  if (state.user?.role !== "admin") return;
+  activityList.innerHTML = "";
+  const rows = await apiFetch("/api/admin/activity?limit=200");
+  rows.forEach((r) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <strong>${escapeHtml(r.action_type)}</strong>
+      <span>${escapeHtml(r.created_at)}</span>
+      <span>${escapeHtml(r.username || "unknown")} (${escapeHtml(r.role || "-")})</span>
+    `;
+    activityList.appendChild(card);
+  });
+}
+
+tabs.forEach((tab) => {
+  tab.addEventListener("click", async () => {
+    const name = tab.dataset.tab;
+    if (name === "admin") await loadUsers();
+    if (name === "activity") await loadActivity();
+  });
+});
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -356,5 +410,4 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-// start
-showView("login", true);
+showView("login");
