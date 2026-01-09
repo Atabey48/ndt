@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDT Document Hub</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=3" />
   </head>
   <body>
     <div class="top-credit">by Furkan ATABEY</div>
@@ -43,15 +43,18 @@
         <div class="tabs">
           <button class="tab active" data-tab="documents">Dokümanlar</button>
           <button class="tab" data-tab="tool">Tool/Search</button>
-          <button class="tab" data-tab="audit" id="audit-tab">Audit Logs</button>
         </div>
         <div id="documents-tab" class="tab-content active" data-tab="documents">
           <div id="admin-tools" class="admin-tools">
-            <h3>PDF Yükle</h3>
+            <h3>Doküman Kaydı</h3>
             <form id="upload-form" class="card">
               <label>
                 Doküman Adı
                 <input type="text" name="title" required />
+              </label>
+              <label>
+                PDF URL (opsiyonel)
+                <input type="url" name="pdf_url" placeholder="https://..." />
               </label>
               <label>
                 Revizyon Tarihi
@@ -61,11 +64,7 @@
                 Etiketler
                 <input type="text" name="tags" placeholder="UT, RT, Visual" />
               </label>
-              <label>
-                PDF Dosyası
-                <input type="file" name="file" accept="application/pdf" required />
-              </label>
-              <button type="submit" class="primary">Upload</button>
+              <button type="submit" class="primary">Kaydet</button>
               <div id="upload-message" class="hint"></div>
             </form>
           </div>
@@ -85,15 +84,9 @@
             <div id="tool-results" class="grid"></div>
           </div>
         </div>
-        <div id="audit-tab-content" class="tab-content" data-tab="audit">
-          <div class="card">
-            <h3>Audit Logs</h3>
-            <div id="audit-list" class="list"></div>
-          </div>
-        </div>
       </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/app.js?v=3"></script>
   </body>
 </html>
