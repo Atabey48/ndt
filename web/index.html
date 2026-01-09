@@ -4,144 +4,86 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDT Document Hub</title>
-    <link rel="stylesheet" href="/style.css?v=2" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="top-credit">by Furkan Atabey</div>
 
     <main class="app">
-      <!-- LOGIN -->
       <section id="login-view" class="view active">
         <h1>NDT Document Hub</h1>
-        <p class="subtitle">Manufacturer-based document library for NDT references</p>
+        <p class="subtitle">Manufacturer-based document listing (PDF via URL)</p>
+
+        <div class="role-switch">
+          <button class="pill active" data-role="user">User</button>
+          <button class="pill" data-role="admin">Admin</button>
+        </div>
 
         <form id="login-form" class="card">
           <label>
-            Username
-            <input type="text" name="username" autocomplete="username" required />
-          </label>
-          <label>
-            Password
-            <input type="password" name="password" autocomplete="current-password" required />
+            Username (optional)
+            <input type="text" name="username" placeholder="guest" />
           </label>
 
-          <button type="submit" class="primary">Sign in</button>
+          <div id="admin-key-wrap" style="display: none;">
+            <label>
+              Admin Key
+              <input type="password" name="admin_key" placeholder="X-Admin-Key" />
+            </label>
+            <p class="hint">
+              Admin can add/delete documents. Users can only view.
+            </p>
+          </div>
+
+          <button type="submit" class="primary">Continue</button>
           <div id="login-error" class="error"></div>
         </form>
       </section>
 
-      <!-- MANUFACTURERS -->
       <section id="manufacturer-view" class="view">
-        <div class="header-row">
-          <div>
-            <h2>Select Manufacturer</h2>
-            <p class="hint">Theme will be applied automatically based on the selected OEM.</p>
-          </div>
-          <button id="logout" class="ghost">Sign out</button>
-        </div>
-
+        <h2>Select Manufacturer</h2>
         <div id="manufacturer-list" class="grid"></div>
       </section>
 
-      <!-- DASHBOARD -->
       <section id="dashboard-view" class="view">
         <div class="header-row">
           <h2 id="dashboard-title">Documents</h2>
-          <div class="header-actions">
-            <button id="back-to-manufacturers" class="ghost">Back</button>
-            <button id="logout2" class="ghost">Sign out</button>
-          </div>
+          <button id="logout" class="ghost">Logout</button>
         </div>
 
-        <div class="tabs">
-          <button class="tab active" data-tab="documents">Documents</button>
-          <button class="tab" data-tab="admin" id="admin-tab-btn">Admin</button>
-          <button class="tab" data-tab="activity" id="activity-tab-btn">Activity</button>
+        <div id="admin-tools" class="admin-tools">
+          <h3>Add Document (Admin)</h3>
+          <form id="upload-form" class="card">
+            <label>
+              Title
+              <input type="text" name="title" required />
+            </label>
+            <label>
+              PDF URL (required)
+              <input type="url" name="pdf_url" placeholder="https://..." required />
+            </label>
+            <label>
+              Revision Date (optional)
+              <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
+            </label>
+            <label>
+              Tags (optional)
+              <input type="text" name="tags" placeholder="UT, RT, VT" />
+            </label>
+            <button type="submit" class="primary">Save</button>
+            <div id="upload-message" class="hint"></div>
+          </form>
         </div>
 
-        <!-- Documents tab -->
-        <div class="tab-content active" data-tab="documents">
-          <div class="search-bar">
-            <input id="doc-search" type="text" placeholder="Search document title..." />
-          </div>
-
-          <div id="document-list" class="list"></div>
+        <div class="search-bar">
+          <input id="doc-search" type="text" placeholder="Search by title or tags..." />
         </div>
 
-        <!-- Admin tab (admin only) -->
-        <div class="tab-content" data-tab="admin" id="admin-tab">
-          <div class="grid two">
-            <div class="card">
-              <h3>Create User</h3>
-              <form id="create-user-form" class="form-grid">
-                <label>
-                  Username
-                  <input type="text" name="new_username" required />
-                </label>
-                <label>
-                  Password
-                  <input type="password" name="new_password" required />
-                </label>
-                <label>
-                  Role
-                  <select name="new_role" required>
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </label>
-                <button type="submit" class="primary">Create</button>
-                <div id="create-user-msg" class="hint"></div>
-              </form>
-            </div>
-
-            <div class="card">
-              <h3>Upload PDF</h3>
-              <form id="upload-form" class="form-grid">
-                <label>
-                  Title
-                  <input type="text" name="title" required />
-                </label>
-                <label>
-                  Revision Date (optional)
-                  <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
-                </label>
-                <label>
-                  Tags (optional)
-                  <input type="text" name="tags" placeholder="UT, RT, VT..." />
-                </label>
-                <label>
-                  PDF File
-                  <input type="file" name="file" accept="application/pdf" required />
-                </label>
-                <button type="submit" class="primary">Upload</button>
-                <div id="upload-message" class="hint"></div>
-              </form>
-            </div>
-          </div>
-
-          <div class="card" style="margin-top:16px;">
-            <h3>Users</h3>
-            <div id="users-table" class="table"></div>
-          </div>
-        </div>
-
-        <!-- Activity tab (admin only) -->
-        <div class="tab-content" data-tab="activity" id="activity-tab">
-          <div class="grid two">
-            <div class="card">
-              <h3>Active Sessions</h3>
-              <div class="hint">Duration is computed from sign-in time to last heartbeat.</div>
-              <div id="sessions-table" class="table"></div>
-            </div>
-            <div class="card">
-              <h3>Audit Logs</h3>
-              <div id="audit-table" class="table"></div>
-            </div>
-          </div>
-        </div>
+        <div id="document-list" class="list"></div>
+        <div id="section-panel" class="section-panel"></div>
       </section>
     </main>
 
-    <script src="/app.js?v=2"></script>
+    <script src="app.js"></script>
   </body>
 </html>
