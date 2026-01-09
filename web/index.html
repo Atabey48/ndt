@@ -5,82 +5,104 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDT Document Hub</title>
     <link rel="stylesheet" href="styles.css" />
+
+    <!-- PDF.js (for admin: extract headings/figures from PDF URL) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js"></script>
   </head>
   <body>
     <div class="top-credit">by Furkan Atabey</div>
 
     <main class="app">
+      <!-- LOGIN -->
       <section id="login-view" class="view active">
         <h1>NDT Document Hub</h1>
-        <p class="subtitle">Manufacturer-based document listing (PDF via URL)</p>
-
-        <div class="role-switch">
-          <button class="pill active" data-role="user">User</button>
-          <button class="pill" data-role="admin">Admin</button>
-        </div>
+        <p class="subtitle">Login with username/password. Role is automatic.</p>
 
         <form id="login-form" class="card">
           <label>
-            Username (optional)
-            <input type="text" name="username" placeholder="guest" />
+            Username
+            <input type="text" name="username" required />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" required />
           </label>
 
-          <div id="admin-key-wrap" style="display: none;">
-            <label>
-              Admin Key
-              <input type="password" name="admin_key" placeholder="X-Admin-Key" />
-            </label>
-            <p class="hint">
-              Admin can add/delete documents. Users can only view.
-            </p>
-          </div>
-
-          <button type="submit" class="primary">Continue</button>
+          <button type="submit" class="primary">Login</button>
           <div id="login-error" class="error"></div>
         </form>
       </section>
 
+      <!-- MANUFACTURERS -->
       <section id="manufacturer-view" class="view">
-        <h2>Select Manufacturer</h2>
+        <div class="header-row">
+          <h2>Select Manufacturer</h2>
+          <button id="back-to-login" class="ghost">Back</button>
+        </div>
         <div id="manufacturer-list" class="grid"></div>
       </section>
 
+      <!-- DASHBOARD -->
       <section id="dashboard-view" class="view">
         <div class="header-row">
-          <h2 id="dashboard-title">Documents</h2>
-          <button id="logout" class="ghost">Logout</button>
+          <div>
+            <h2 id="dashboard-title">Documents</h2>
+            <div id="role-badge" class="hint"></div>
+          </div>
+          <div class="header-actions">
+            <button id="back-to-manufacturers" class="ghost">Back</button>
+            <button id="logout" class="ghost">Logout</button>
+          </div>
         </div>
 
-        <div id="admin-tools" class="admin-tools">
-          <h3>Add Document (Admin)</h3>
-          <form id="upload-form" class="card">
-            <label>
-              Title
-              <input type="text" name="title" required />
-            </label>
-            <label>
-              PDF URL (required)
-              <input type="url" name="pdf_url" placeholder="https://..." required />
-            </label>
-            <label>
-              Revision Date (optional)
-              <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
-            </label>
-            <label>
-              Tags (optional)
-              <input type="text" name="tags" placeholder="UT, RT, VT" />
-            </label>
-            <button type="submit" class="primary">Save</button>
-            <div id="upload-message" class="hint"></div>
-          </form>
-        </div>
+        <div class="two-col">
+          <!-- LEFT: MENU -->
+          <aside class="menu">
+            <div class="menu-title">Menu</div>
+            <div id="doc-menu" class="menu-list"></div>
 
-        <div class="search-bar">
-          <input id="doc-search" type="text" placeholder="Search by title or tags..." />
-        </div>
+            <div class="menu-title" style="margin-top: 18px;">Tool Search</div>
+            <div class="search-bar">
+              <input id="tool-query" type="text" placeholder="keyword" />
+              <button id="tool-search" class="primary">Search</button>
+            </div>
+            <div id="tool-results" class="menu-list"></div>
+          </aside>
 
-        <div id="document-list" class="list"></div>
-        <div id="section-panel" class="section-panel"></div>
+          <!-- RIGHT: CONTENT -->
+          <section class="content">
+            <!-- ADMIN PANEL -->
+            <div id="admin-tools" class="admin-tools">
+              <h3>Admin: Add Document (PDF URL)</h3>
+              <form id="upload-form" class="card">
+                <label>
+                  Title
+                  <input type="text" name="title" required />
+                </label>
+                <label>
+                  PDF URL
+                  <input type="url" name="pdf_url" placeholder="https://..." required />
+                </label>
+                <label>
+                  Revision Date (optional)
+                  <input type="text" name="revision_date" placeholder="YYYY-MM-DD" />
+                </label>
+                <label>
+                  Tags (optional)
+                  <input type="text" name="tags" placeholder="UT, RT, VT" />
+                </label>
+
+                <button type="submit" class="primary">Save and Extract Headings</button>
+                <div id="upload-message" class="hint"></div>
+              </form>
+            </div>
+
+            <div id="content-panel" class="section-panel">
+              <h3>Open a document from the menu</h3>
+              <p class="hint">Headings and figures will be shown here.</p>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
 
